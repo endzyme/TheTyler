@@ -4,7 +4,7 @@
 
 > In Freemasonry, the Tyler (or Tiler) is the outer guard of the lodge — the one who stands at the door and decides who may enter.
 
-The Tyler is a lightweight, self-hostable IP allowlist manager. It lets you share access to a self-hosted service — a media server, photo album, SSH port, private web app — without requiring users to install a VPN client or giving them access to anything beyond that one port.
+The Tyler is a lightweight, self-hostable IP allowlist manager. It lets you share access to a self-hosted service — a media server, photo album, SSH port, self-hosted web app — without requiring users to install a VPN client or giving them access to anything beyond that one port.
 
 Users authorize their IP address via a magic link email flow. That allowlist is automatically propagated to one or more **sync agents** running on your protected servers, which enforce it at the firewall level. Unauthorized IPs never receive a response — the port is invisible to scanners.
 
@@ -12,7 +12,7 @@ Users authorize their IP address via a magic link email flow. That allowlist is 
 
 VPNs (Tailscale, WireGuard, etc.) are great tools, but they require the user to install a client, join your network, and gain access to your entire network topology. Sometimes you just want to say: *"this person can reach port 443 on this one host."*
 
-Maybe you're hosting a private site for friends and family — a media server, photo album, or home dashboard — and you want them to reach it from a browser or an app on a device that doesn't support a VPN client easily. Maybe they're not technical enough to set up WireGuard but can handle an email and a couple of clicks. The Tyler handles the access grant for you, hands-off: they enter their email, click a link, and they're in. And once their home IP is authorized, every device on their network gets access too — their TV app, their tablet, other phones on the same WiFi — without anyone doing anything extra.
+Maybe you're hosting a self-hosted site for friends and family — a media server, photo album, or home dashboard — and you want them to reach it from a browser or an app on a device that doesn't support a VPN client easily. Maybe they're not technical enough to set up WireGuard but can handle an email and a couple of clicks. The Tyler handles the access grant for you, hands-off: they enter their email, click a link, and they're in. And once their home IP is authorized, every device on their network gets access too — their TV app, their tablet, other phones on the same WiFi — without anyone doing anything extra.
 
 The Tyler is for that use case — lightweight access grants without client software, without enrolling users in your network, and without ongoing key management.
 
@@ -53,6 +53,12 @@ The agent interface is intentionally simple: subscribe to a gRPC stream, receive
 | `nftables-sync-client` | included | Linux kernel firewall via nftables named sets |
 | Kubernetes NetworkPolicy | planned | `NetworkPolicy` / `CiliumNetworkPolicy` reconciliation |
 | Other firewalls | community | iptables, pf, Windows Firewall, etc. |
+
+## Distributed Sync Agents
+
+Sync agents do not have to live on the same network as the web app. The web app can run on a cloud provider while agents run on completely separate networks — home labs, office servers, cloud VMs, or any other environment. Each agent connects outbound to the web app's gRPC endpoint, so there is no requirement for the agent and the web app to share a network.
+
+You can run many sync agents, each managed by its own API key. This lets you protect multiple services across different networks from a single web app instance, with independent access control for each agent.
 
 ## Email
 
