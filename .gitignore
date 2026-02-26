@@ -1,0 +1,22 @@
+# Compiled binaries (any ELF/exe at repo root or within module dirs)
+/nftables-sync-client/nftables-sync-client
+/web-app/web-app
+/nftable-sync
+/nftable-sync-*
+
+# Test binaries
+*.test
+
+# Go workspace cache
+.goflags
+
+# Local dev secrets
+.env
+data/
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store

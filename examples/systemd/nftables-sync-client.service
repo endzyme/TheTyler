@@ -1,0 +1,21 @@
+[Unit]
+Description=IP Allowlist Sync Client (nftables)
+After=network-online.target nftables.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/nftables-sync-client.env
+ExecStart=/usr/local/bin/nftables-sync-client
+Restart=always
+RestartSec=5
+
+# Run as a dedicated unprivileged user. CAP_NET_ADMIN is the only Linux
+# capability required to manage nftables via netlink. CapabilityBoundingSet
+# prevents the process from ever acquiring any other capability.
+User=nftables-sync
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+[Install]
+WantedBy=multi-user.target

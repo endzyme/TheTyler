@@ -1,0 +1,168 @@
+{{define "content"}}
+<h1>Admin Panel</h1>
+
+{{if .NewKey}}
+{{template "new-key-notice" .}}
+{{end}}
+
+<h2>Authorized Emails</h2>
+<div id="emails-list">
+  {{template "emails-partial" .}}
+</div>
+
+<form hx-post="/admin/emails" hx-target="#emails-list" hx-swap="innerHTML" style="margin-top:1rem">
+  <input type="hidden" name="action" value="add">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <input type="email" name="email" placeholder="new@example.com" required style="width:auto;display:inline-block;margin-right:0.5rem">
+  <button type="submit">Add email</button>
+</form>
+
+<h2>Recent IP Records</h2>
+<div id="ips-list">
+  {{template "ips-partial" .}}
+</div>
+
+<h2>API Keys</h2>
+<div id="keys-list">
+  {{template "keys-partial" .}}
+</div>
+
+<form hx-post="/admin/keys" hx-target="#keys-list" hx-swap="innerHTML" style="margin-top:1rem">
+  <input type="hidden" name="action" value="create">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <input type="text" name="name" placeholder="Key name (e.g. server-1)" required style="width:auto;display:inline-block;margin-right:0.5rem">
+  <button type="submit">Create key</button>
+</form>
+
+<script>
+  async function copyAPIKey(button) {
+    const key = button && button.dataset ? button.dataset.key : "";
+    if (!key) return;
+
+    try {
+      await navigator.clipboard.writeText(key);
+    } catch (_) {
+      const el = document.createElement("textarea");
+      el.value = key;
+      el.setAttribute("readonly", "");
+      el.style.position = "absolute";
+      el.style.left = "-9999px";
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand("copy");
+      document.body.removeChild(el);
+    }
+
+    const original = button.textContent;
+    button.textContent = "Copied!";
+    button.disabled = true;
+    setTimeout(() => {
+      button.textContent = original;
+      button.disabled = false;
+    }, 1200);
+  }
+</script>
+{{end}}
+
+{{define "new-key-notice"}}
+<div class="notice success">
+  <strong>API key "{{.NewKeyName}}" created.</strong> Copy it now — it will not be shown again:<br>
+  <div class="key-display" style="margin-top:0.5rem">{{.NewKey}}</div>
+  <button type="button" data-key="{{.NewKey}}" onclick="copyAPIKey(this)" style="margin-top:0.6rem">Copy key</button>
+</div>
+{{end}}
+
+{{define "emails-partial"}}
+<table>
+  <thead><tr><th>Email</th><th>Added</th><th></th></tr></thead>
+  <tbody>
+  {{range .Emails}}
+  <tr>
+    <td>{{.Email}}</td>
+    <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td>
+      <form hx-post="/admin/emails" hx-target="#emails-list" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="action" value="remove">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="email" value="{{.Email}}">
+        <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Remove</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="3">No authorized emails yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "ips-partial"}}
+<table>
+  <thead><tr><th>Email</th><th>IP</th><th>Authorized at</th><th></th></tr></thead>
+  <tbody>
+  {{range .IPs}}
+  <tr>
+    <td>{{.Email}}</td>
+    <td>{{.IP}}</td>
+    <td>{{.AuthedAt.Format "2006-01-02 15:04 UTC"}}</td>
+    <td>
+      <form hx-post="/admin/ips" hx-target="#ips-list" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="action" value="remove">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="ip" value="{{.IP}}">
+        <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Remove</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="4">No records yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}
+
+{{define "keys-partial"}}
+{{if .NewKey}}
+{{template "new-key-notice" .}}
+{{end}}
+<table>
+  <thead><tr><th>Name</th><th>Created</th><th>Last activity</th><th>Connected</th><th>Status</th><th></th></tr></thead>
+  <tbody>
+  {{range .Keys}}
+  {{$connected := index $.KeyConnections .KeyHash}}
+  <tr>
+    <td{{if .DisabledAt}} class="revoked"{{end}}>{{.Name}}</td>
+    <td>{{.CreatedAt.Format "2006-01-02"}}</td>
+    <td>{{if .LastActionAt}}{{.LastActionAt.Format "2006-01-02 15:04 UTC"}}{{else}}Never{{end}}</td>
+    <td>{{if gt $connected 0}}Yes ({{$connected}}){{else}}No{{end}}</td>
+    <td>{{if .DisabledAt}}Disabled{{else}}Active{{end}}</td>
+    <td>
+      {{if not .DisabledAt}}
+      <form hx-post="/admin/keys" hx-target="#keys-list" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="action" value="disable">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Disable</button>
+      </form>
+      {{else}}
+      <form hx-post="/admin/keys" hx-target="#keys-list" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="action" value="enable">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" style="padding:0.2rem 0.6rem;font-size:0.8rem;margin-right:0.4rem">Enable</button>
+      </form>
+      <form hx-post="/admin/keys" hx-target="#keys-list" hx-swap="innerHTML" style="display:inline">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Delete</button>
+      </form>
+      {{end}}
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="6">No API keys yet.</td></tr>
+  {{end}}
+  </tbody>
+</table>
+{{end}}

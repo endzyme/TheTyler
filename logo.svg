@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-15 -15 330 360" width="300" height="340">
+
+  <defs>
+    <mask id="sword">
+      <rect x="-15" y="-15" width="330" height="360" fill="white"/>
+      <rect x="143" y="105" width="14" height="110" fill="black"/>
+      <polygon points="143,105 157,105 150,72" fill="black"/>
+      <rect x="118" y="214" width="64" height="11" rx="1" fill="black"/>
+      <rect x="145" y="225" width="10" height="26" rx="1" fill="black"/>
+      <rect x="139" y="251" width="22" height="11" rx="4" fill="black"/>
+    </mask>
+
+    <clipPath id="shieldClip">
+      <path d="M150 18 L258 55 L258 188 Q258 278 150 316 Q42 278 42 188 L42 55 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Border: same shield path, no stroke, just slightly scaled up from center -->
+  <g transform="translate(150, 167) scale(1.075) translate(-150, -167)">
+    <path d="M150 18 L258 55 L258 188 Q258 278 150 316 Q42 278 42 188 L42 55 Z"
+          fill="#0D2240"
+          stroke="none"/>
+  </g>
+
+  <!-- Shield fill with sword cutout -->
+  <g mask="url(#sword)">
+    <path d="M150 18 L42 55 L42 188 Q42 278 150 316 L150 18 Z" fill="#1B3A6B"/>
+    <path d="M150 18 L258 55 L258 188 Q258 278 150 316 L150 18 Z" fill="#2E6BC4"/>
+  </g>
+
+  <!-- Lock on left — lighter blue -->
+  <g clip-path="url(#shieldClip)">
+    <path d="M80 148 L80 136 Q90 122 100 136 L100 148"
+          fill="none" stroke="#2E6BC4" stroke-width="6" stroke-linecap="round"/>
+    <rect x="74" y="147" width="32" height="26" rx="4" fill="#2E6BC4"/>
+    <circle cx="90" cy="157" r="5" fill="#1B3A6B"/>
+    <rect x="87" y="157" width="6" height="8" rx="1" fill="#1B3A6B"/>
+  </g>
+
+  <!-- Castle door on right — dark navy -->
+  <g clip-path="url(#shieldClip)">
+    <path d="M196 173 L196 138 Q196 122 210 122 Q224 122 224 138 L224 173 Z"
+          fill="#1B3A6B"/>
+    <path d="M199 172 L199 139 Q199 125 210 125 Q221 125 221 139 L221 172"
+          fill="none" stroke="#2E6BC4" stroke-width="1.5" opacity="0.4"/>
+    <circle cx="220" cy="150" r="3" fill="#2E6BC4" opacity="0.65"/>
+  </g>
+
+</svg>

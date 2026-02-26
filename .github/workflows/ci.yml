@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.work
+          cache: true
+
+      - name: Build web-app
+        run: go build -o /tmp/thetyler ./web-app/cmd/web-app
+
+      - name: Build nftables-sync-client
+        run: go build -o /tmp/nftables-sync-client ./nftables-sync-client/cmd/nftables-sync-client
+
+      - name: Vet
+        run: |
+          go vet ./web-app/...
+          go vet ./nftables-sync-client/...
+
+      - name: Test
+        run: |
+          go test ./web-app/...
+          go test ./nftables-sync-client/...

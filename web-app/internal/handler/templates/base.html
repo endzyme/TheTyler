@@ -1,0 +1,83 @@
+{{define "base"}}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Tyler</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 640px;
+    margin: 3rem auto;
+    padding: 0 1rem;
+    color: #111;
+    background: #fafafa;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 2rem; }
+  h2 { font-size: 1.1rem; margin-top: 2rem; }
+  label { display: block; margin-bottom: 0.25rem; font-size: 0.9rem; }
+  input[type="email"], input[type="text"] {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+  }
+  button, .btn {
+    padding: 0.5rem 1.25rem;
+    background: #1a1a2e;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+  }
+  button:hover, .btn:hover { background: #16213e; }
+  button.danger { background: #c0392b; }
+  button.danger:hover { background: #a93226; }
+  .notice {
+    padding: 0.75rem 1rem;
+    background: #e8f4f8;
+    border-left: 4px solid #3498db;
+    margin-bottom: 1rem;
+    border-radius: 0 4px 4px 0;
+  }
+  .notice.success { background: #eafaf1; border-color: #27ae60; }
+  .notice.warn { background: #fef9e7; border-color: #f39c12; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  th, td { padding: 0.5rem 0.75rem; border-bottom: 1px solid #eee; text-align: left; }
+  th { background: #f4f4f4; }
+  .revoked { color: #999; text-decoration: line-through; }
+  nav { margin-bottom: 2rem; }
+  nav a { margin-right: 1rem; color: #1a1a2e; }
+  .key-display {
+    font-family: monospace;
+    background: #f4f4f4;
+    padding: 0.5rem;
+    border-radius: 4px;
+    word-break: break-all;
+  }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/">Home</a>
+  {{if .SessionIsAdmin}}<a href="/admin">Admin</a>{{end}}
+  {{if .LoggedIn}}
+  <form method="POST" action="/logout" style="display:inline">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+    <button type="submit" style="background:none;border:none;padding:0;color:#1a1a2e;cursor:pointer;font-size:inherit;text-decoration:underline">Sign out</button>
+  </form>
+  {{end}}
+</nav>
+{{template "content" .}}
+</body>
+</html>
+{{end}}

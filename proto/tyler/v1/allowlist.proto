@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package tyler.v1;
+
+option go_package = "github.com/endzyme/the-tyler/proto/gen/tyler/v1;tylerv1";
+
+import "google/protobuf/timestamp.proto";
+
+// AllowlistSnapshot is the full current set of authorized IPs.
+// The web app streams this to all connected sync clients whenever the
+// allowlist changes. The sync client always applies the full snapshot —
+// there are no incremental updates.
+message AllowlistSnapshot {
+  repeated string ips = 1;
+  google.protobuf.Timestamp generated_at = 2;
+}
+
+message SubscribeRequest {}
+
+service AllowlistService {
+  // Subscribe opens a long-lived server-streaming RPC. The server pushes a
+  // fresh AllowlistSnapshot immediately on connect and again on every change.
+  rpc Subscribe(SubscribeRequest) returns (stream AllowlistSnapshot);
+}

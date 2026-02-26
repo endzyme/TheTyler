@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    # AllowlistSnapshot is an intentional domain name, not a generic response envelope.
+    - RPC_RESPONSE_STANDARD_NAME
+breaking:
+  use:
+    - FILE

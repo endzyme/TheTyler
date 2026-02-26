@@ -1,0 +1,23 @@
+# Example Caddy configuration for self-hosted deployment.
+# Requires the caddy-ratelimit module:
+#   https://github.com/mholt/caddy-ratelimit
+#
+# Install Caddy with the module:
+#   xcaddy build --with github.com/mholt/caddy-ratelimit
+
+auth-e.example.com {
+    # Rate limit the email submission endpoint to mitigate spam.
+    # Adjust the window and limit to your preference.
+    rate_limit {
+        zone submit {
+            match {
+                path /submit
+            }
+            key {remote_host}
+            events 5
+            window 1m
+        }
+    }
+
+    reverse_proxy localhost:8080
+}
