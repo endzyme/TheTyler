@@ -12,6 +12,8 @@ Users authorize their IP address via a magic link email flow. That allowlist is 
 
 VPNs (Tailscale, WireGuard, etc.) are great tools, but they require the user to install a client, join your network, and gain access to your entire network topology. Sometimes you just want to say: *"this person can reach port 443 on this one host."*
 
+Maybe you're hosting a private site for friends and family — a media server, photo album, or home dashboard — and you want them to reach it from a browser or an app on a device that doesn't support a VPN client easily. Maybe they're not technical enough to set up WireGuard but can handle an email and a couple of clicks. The Tyler handles the access grant for you, hands-off: they enter their email, click a link, and they're in. And once their home IP is authorized, every device on their network gets access too — their TV app, their tablet, other phones on the same WiFi — without anyone doing anything extra.
+
 The Tyler is for that use case — lightweight access grants without client software, without enrolling users in your network, and without ongoing key management.
 
 ## How It Works
@@ -35,7 +37,6 @@ Web App  ───────────────────────�
 Sync Agent (on your protected server)
     │  · receives AllowlistSnapshot updates
     │  · reconciles firewall rules atomically
-    │  · reconnects with backoff, fails open on disconnect
     │
     ▼
 Firewall / Network Policy
@@ -65,6 +66,8 @@ Supported email providers (configured via `EMAIL_DRIVER` env var):
 ## Known Gaps
 
 **IPv6** — IP addresses are stored as plain strings without normalization. IPv6 representations are not canonicalized, and the nftables set type is `ipv4_addr` only. Users on IPv6-only networks cannot authorize their IP.
+
+Many IPv6 networks (particularly mobile carriers) use NAT64 or similar translation mechanisms, meaning an IPv6 device accessing your service over IPv4 may present different source IPs depending on which translation pool or tower handles the connection. Allowlisting the IP seen at authorization time provides no reliable protection for subsequent requests from the same device.
 
 **Kubernetes / Container Sync Agent** — A sync agent that reconciles Kubernetes `NetworkPolicy` or `CiliumNetworkPolicy` resources is a natural extension of this design but is not yet implemented. See the nftables sync client for reference on the gRPC subscription and reconnect pattern.
 
