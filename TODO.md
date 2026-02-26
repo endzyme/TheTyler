@@ -59,3 +59,7 @@ Currently only `examples/systemd/nftables-sync-client.service` exists. Add:
 
 - `examples/docker-compose.yml` — already present; add a Caddy service to the compose file so a single `docker compose up` gives a fully TLS-terminated stack for local testing.
 - `examples/kubernetes/` — basic manifests: `Deployment`, `Service`, `Secret` (for env vars), and a `NetworkPolicy` that the sync client will manage.
+
+### Tests
+
+- Tests haven't been written
