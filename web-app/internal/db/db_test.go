@@ -177,6 +177,46 @@ func TestExpiryNotificationSkipsUnauthorizedEmail(t *testing.T) {
 	}
 }
 
+// Removing an authorized email must revoke access immediately by deleting that
+// email's IP records, so they drop out of the active snapshot at once — but
+// must not disturb another user's records.
+func TestRemoveAuthorizedEmailPurgesIPs(t *testing.T) {
+	ctx := context.Background()
+	d := openTest(t, 90)
+
+	for _, e := range []string{"a@example.com", "b@example.com"} {
+		if err := d.AddAuthorizedEmail(ctx, e); err != nil {
+			t.Fatalf("add email %s: %v", e, err)
+		}
+	}
+	if err := d.UpsertIPRecord(ctx, "a@example.com", "203.0.113.5"); err != nil {
+		t.Fatalf("upsert a: %v", err)
+	}
+	if err := d.UpsertIPRecord(ctx, "b@example.com", "203.0.113.9"); err != nil {
+		t.Fatalf("upsert b: %v", err)
+	}
+
+	if err := d.RemoveAuthorizedEmail(ctx, "a@example.com"); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+
+	recs, err := d.ListIPRecords(ctx)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(recs) != 1 || recs[0].Email != "b@example.com" {
+		t.Fatalf("expected only b's record to remain, got %+v", recs)
+	}
+
+	ips, err := d.GetActiveIPs(ctx)
+	if err != nil {
+		t.Fatalf("active: %v", err)
+	}
+	if len(ips) != 1 || ips[0] != "203.0.113.9" {
+		t.Fatalf("expected only b's IP active, got %v", ips)
+	}
+}
+
 func TestGetIPRecordMissing(t *testing.T) {
 	ctx := context.Background()
 	d := openTest(t, 90)

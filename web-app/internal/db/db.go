@@ -233,11 +233,29 @@ func (d *DB) AddAuthorizedEmail(ctx context.Context, email string) error {
 	return err
 }
 
+// RemoveAuthorizedEmail de-authorizes an email and revokes its access by also
+// deleting all of that email's IP records in the same transaction. Callers
+// should push a fresh snapshot afterwards so the firewall drops the removed
+// IPs immediately rather than at TTL.
 func (d *DB) RemoveAuthorizedEmail(ctx context.Context, email string) error {
-	_, err := d.sql.ExecContext(ctx,
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM authorized_emails WHERE email = ?`, email,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM ip_records WHERE email = ?`, email,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
 
 func (d *DB) ListAuthorizedEmails(ctx context.Context) ([]AuthorizedEmail, error) {

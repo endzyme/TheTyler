@@ -196,7 +196,8 @@ For self-hosters using Proton Mail: use the `smtp` driver with `smtp.protonmail.
 - TTL is enforced entirely on the web app side; the sync client has no TTL logic
 - When a record ages out, the next snapshot push to sync clients will omit that IP, and the nftables set will be updated atomically to remove it
 - Expired records are **not** deleted from the database. Instead the user can sign in again and refresh the same IP with a single "Reauthorize" click — no full re-authorization from scratch is required.
-- A background job emails the user once when their IP expires, telling them they can sign in to refresh it. The notification flag is cleared whenever the record is refreshed, so a future lapse notifies again. The same job prunes stale single-use token records.
+- A background job emails the user once when their IP expires, telling them they can sign in to refresh it. The notification flag is cleared whenever the record is refreshed, so a future lapse notifies again. De-authorized emails are excluded so a removed user is never invited back. The same job prunes stale single-use token records.
+- Removing an email from the authorized list revokes access immediately: it deletes that email's IP records in the same transaction and pushes a fresh snapshot, so the firewall drops those IPs at once rather than waiting for the TTL.
 
 ---
 

@@ -84,6 +84,9 @@ func (h *Handler) adminEmails(w http.ResponseWriter, r *http.Request) {
 			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 			return
 		}
+		// Removal also deletes the email's IP records, so refresh the allowlist
+		// to revoke firewall access immediately instead of at TTL.
+		go h.grpcSrv.NotifyAll()
 	default:
 		h.renderError(w, r, "Unknown action.", http.StatusBadRequest)
 		return
