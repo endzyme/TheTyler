@@ -1,8 +1,8 @@
 {{define "content"}}
-<h1>Access Granted</h1>
+<h1>{{if .Reauth}}Access Refreshed{{else}}Access Granted{{end}}</h1>
 <div class="notice success">
-  <strong>{{.IP}}</strong> has been authorized.
+  <strong>{{.IP}}</strong> has been {{if .Reauth}}reauthorized{{else}}authorized{{end}}.
 </div>
-<p>Your IP address will remain in the allowlist for the configured TTL period.</p>
-<p><a href="/">Request access again</a></p>
+<p>Your IP address will remain live in the allowlist for the configured TTL period. If it expires, sign in again to refresh it.</p>
+<p><a href="/">Back to home</a></p>
 {{end}}

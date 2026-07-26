@@ -7,6 +7,10 @@ import (
 
 type Mailer interface {
 	SendMagicLink(ctx context.Context, to, link string) error
+	// SendExpiryNotice tells a user that their authorized IP has aged out of the
+	// allowlist and that they can sign in at baseURL to refresh it. Like the
+	// magic-link mail, it stays low-information and names no protected service.
+	SendExpiryNotice(ctx context.Context, to, baseURL string) error
 }
 
 type MailerConfig struct {

@@ -84,6 +84,9 @@ func (h *Handler) adminEmails(w http.ResponseWriter, r *http.Request) {
 			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 			return
 		}
+		// Removal also deletes the email's IP records, so refresh the allowlist
+		// to revoke firewall access immediately instead of at TTL.
+		go h.grpcSrv.NotifyAll()
 	default:
 		h.renderError(w, r, "Unknown action.", http.StatusBadRequest)
 		return
@@ -113,20 +116,21 @@ func (h *Handler) adminIPs(w http.ResponseWriter, r *http.Request) {
 
 	action := r.FormValue("action")
 	ipAddr := strings.TrimSpace(r.FormValue("ip"))
+	emailAddr := strings.TrimSpace(r.FormValue("email"))
 	ctx := r.Context()
 
 	switch action {
 	case "remove":
-		if ipAddr == "" {
-			h.renderError(w, r, "IP required.", http.StatusBadRequest)
+		if ipAddr == "" || emailAddr == "" {
+			h.renderError(w, r, "Email and IP required.", http.StatusBadRequest)
 			return
 		}
 		if net.ParseIP(ipAddr) == nil {
 			h.renderError(w, r, "Invalid IP address.", http.StatusBadRequest)
 			return
 		}
-		if err := h.db.RemoveIPRecordsByIP(ctx, ipAddr); err != nil {
-			log.Printf("admin: remove ip %q: %v", ipAddr, err)
+		if err := h.db.RemoveIPRecord(ctx, emailAddr, ipAddr); err != nil {
+			log.Printf("admin: remove ip %q for %q: %v", ipAddr, emailAddr, err)
 			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 			return
 		}

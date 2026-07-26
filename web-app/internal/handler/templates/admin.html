@@ -98,24 +98,26 @@
 
 {{define "ips-partial"}}
 <table>
-  <thead><tr><th>Email</th><th>IP</th><th>Authorized at</th><th></th></tr></thead>
+  <thead><tr><th>Email</th><th>IP</th><th>Authorized at</th><th>Status</th><th></th></tr></thead>
   <tbody>
   {{range .IPs}}
   <tr>
     <td>{{.Email}}</td>
     <td>{{.IP}}</td>
     <td>{{.AuthedAt.Format "2006-01-02 15:04 UTC"}}</td>
+    <td>{{if .Expired}}<span class="revoked">Expired</span>{{else}}Live{{end}}</td>
     <td>
       <form hx-post="/admin/ips" hx-target="#ips-list" hx-swap="innerHTML" style="display:inline">
         <input type="hidden" name="action" value="remove">
         <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+        <input type="hidden" name="email" value="{{.Email}}">
         <input type="hidden" name="ip" value="{{.IP}}">
         <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Remove</button>
       </form>
     </td>
   </tr>
   {{else}}
-  <tr><td colspan="4">No records yet.</td></tr>
+  <tr><td colspan="5">No records yet.</td></tr>
   {{end}}
   </tbody>
 </table>

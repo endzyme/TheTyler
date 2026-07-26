@@ -61,6 +61,56 @@ func securityHeaders(cfg *config.Config, next http.Handler) http.Handler {
 	})
 }
 
+// maintenanceInterval is how often the web app scans for expired IP records to
+// notify on and prunes stale single-use token records.
+const maintenanceInterval = time.Hour
+
+// runMaintenance runs periodic housekeeping until ctx is cancelled: it emails
+// users whose authorized IPs have expired (once per lapse) and deletes
+// single-use token records that are well past their usefulness.
+func runMaintenance(ctx context.Context, database *db.DB, mailer email.Mailer, cfg *config.Config) {
+	// Run once shortly after startup, then on a fixed interval.
+	timer := time.NewTimer(time.Minute)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			runMaintenanceOnce(ctx, database, mailer, cfg)
+			timer.Reset(maintenanceInterval)
+		}
+	}
+}
+
+func runMaintenanceOnce(ctx context.Context, database *db.DB, mailer email.Mailer, cfg *config.Config) {
+	// Notify users whose IPs have expired since the last run.
+	emails, err := database.ListExpiredUnnotifiedEmails(ctx)
+	if err != nil {
+		log.Printf("maintenance: list expired: %v", err)
+	} else {
+		for _, addr := range emails {
+			if err := mailer.SendExpiryNotice(ctx, addr, cfg.BaseURL); err != nil {
+				log.Printf("maintenance: send expiry notice to %q: %v", addr, err)
+				continue // leave unnotified so it retries on the next run
+			}
+			if err := database.MarkExpiredNotifiedForEmail(ctx, addr); err != nil {
+				log.Printf("maintenance: mark notified %q: %v", addr, err)
+			}
+		}
+		if len(emails) > 0 {
+			log.Printf("maintenance: sent expiry notices to %d recipient(s)", len(emails))
+		}
+	}
+
+	// Prune single-use token records. A token is rejected on expiry before the
+	// used-token check ever runs, so records older than a day are dead weight.
+	if err := database.DeleteExpiredTokens(ctx, 24*time.Hour); err != nil {
+		log.Printf("maintenance: delete expired tokens: %v", err)
+	}
+}
+
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
@@ -156,6 +206,9 @@ func main() {
 			log.Printf("grpc: %v", err)
 		}
 	}()
+
+	// Start background maintenance: expiry notifications and token cleanup.
+	go runMaintenance(ctx, database, mailer, cfg)
 
 	// Wait for shutdown signal
 	<-ctx.Done()

@@ -15,13 +15,26 @@ type resendMailer struct {
 }
 
 func (m *resendMailer) SendMagicLink(ctx context.Context, to, link string) error {
+	return m.send(ctx, to, "Your access link",
+		"Click the link below to authorize yourself.\n"+
+			"This link expires in 15 minutes and can only be used once.\n\n"+
+			link+"\n\n")
+}
+
+func (m *resendMailer) SendExpiryNotice(ctx context.Context, to, baseURL string) error {
+	return m.send(ctx, to, "Your access has expired",
+		"Your authorized IP address has expired and has been removed from the allowlist.\n"+
+			"Sign in from the network you want to authorize to refresh it:\n\n"+
+			baseURL+"\n")
+}
+
+func (m *resendMailer) send(ctx context.Context, to, subject, text string) error {
 	payload := map[string]any{
 		"from":    m.from,
 		"to":      []string{to},
-		"subject": "Your access link",
-		"text": "Click the link below to authorize yourself.\n" +
-			"This link expires in 15 minutes and can only be used once.\n\n" +
-			link + "\n\n"}
+		"subject": subject,
+		"text":    text,
+	}
 
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -293,11 +293,6 @@ func apiKeyHashFromContext(ctx context.Context) (string, bool) {
 	return h, ok && h != ""
 }
 
-func (s *Server) validateAPIKey(ctx context.Context) error {
-	_, err := s.validateAPIKeyAndHash(ctx)
-	return err
-}
-
 func (s *Server) validateAPIKeyAndHash(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {

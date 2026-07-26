@@ -29,23 +29,23 @@ var templatesFS embed.FS
 var faviconSVG []byte
 
 type Handler struct {
-	cfg         *config.Config
-	db          *db.DB
-	mailer      email.Mailer
-	grpcSrv     *internalgrpc.Server
-	tmplMu      sync.RWMutex
-	tmplCache   map[string]*template.Template
-	fsys        fs.FS
+	cfg           *config.Config
+	db            *db.DB
+	mailer        email.Mailer
+	grpcSrv       *internalgrpc.Server
+	tmplMu        sync.RWMutex
+	tmplCache     map[string]*template.Template
+	fsys          fs.FS
 	submitLimiter *rateLimiter
 }
 
 func New(cfg *config.Config, database *db.DB, mailer email.Mailer, grpcSrv *internalgrpc.Server) (*Handler, error) {
 	h := &Handler{
-		cfg:           cfg,
-		db:            database,
-		mailer:        mailer,
-		grpcSrv:       grpcSrv,
-		tmplCache:     make(map[string]*template.Template),
+		cfg:       cfg,
+		db:        database,
+		mailer:    mailer,
+		grpcSrv:   grpcSrv,
+		tmplCache: make(map[string]*template.Template),
 		// Allow 5 /submit requests per IP per 5 minutes.
 		submitLimiter: newRateLimiter(5, 5*time.Minute),
 	}
@@ -200,6 +200,10 @@ func (h *Handler) renderFragment(w http.ResponseWriter, page, name string, data 
 
 func (h *Handler) renderError(w http.ResponseWriter, r *http.Request, msg string, code int) {
 	log.Printf("http error: status=%d method=%s path=%q remote=%s msg=%q", code, r.Method, r.URL.Path, r.RemoteAddr, msg)
+	// Set the content type before writing the status line; headers set after
+	// WriteHeader are ignored, which (combined with nosniff) would otherwise
+	// leave error pages without a declared HTML content type.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(code)
 	h.render(w, r, "error.html", map[string]any{"Error": msg})
 }

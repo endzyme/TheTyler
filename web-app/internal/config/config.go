@@ -22,7 +22,7 @@ type Config struct {
 	ResendAPIKey       string
 	ResendFrom         string
 	BaseURL            string
-	SecureCookie       bool          // true when BASE_URL uses https
+	SecureCookie       bool // true when BASE_URL uses https
 	TokenExpiryMinutes int
 	TokenExpiry        time.Duration
 	IPTTLDays          int
@@ -114,6 +114,9 @@ func Load() (*Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("IP_TTL_DAYS: %w", err)
 		}
+	}
+	if cfg.IPTTLDays < 0 {
+		return nil, fmt.Errorf("IP_TTL_DAYS must not be negative, got %d", cfg.IPTTLDays)
 	}
 
 	if v := os.Getenv("DATABASE_URL"); v != "" {
