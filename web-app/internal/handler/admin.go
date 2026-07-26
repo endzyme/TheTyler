@@ -16,6 +16,17 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// isIPOrCIDR reports whether s is a valid bare IP address or CIDR prefix.
+// IPv6 allowlist records are stored as /64 prefixes, so the admin remove form
+// submits CIDR strings as well as bare IPv4 addresses.
+func isIPOrCIDR(s string) bool {
+	if net.ParseIP(s) != nil {
+		return true
+	}
+	_, _, err := net.ParseCIDR(s)
+	return err == nil
+}
+
 func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -125,7 +136,7 @@ func (h *Handler) adminIPs(w http.ResponseWriter, r *http.Request) {
 			h.renderError(w, r, "Email and IP required.", http.StatusBadRequest)
 			return
 		}
-		if net.ParseIP(ipAddr) == nil {
+		if !isIPOrCIDR(ipAddr) {
 			h.renderError(w, r, "Invalid IP address.", http.StatusBadRequest)
 			return
 		}

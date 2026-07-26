@@ -125,7 +125,7 @@ DEV_ALLOW_INSECURE_GRPC=true
 
 > **Warning — `DEV_ALLOW_INSECURE_GRPC`**: This skips TLS verification on the gRPC connection. It is acceptable when the sync client and web app are on the same host and gRPC traffic never leaves loopback. Do **not** use this flag if the gRPC port is exposed across a network boundary.
 
-`NFT_PORTS` supports comma-separated ports and ranges (e.g. `8920,9080-9081`). `ALWAYS_ALLOW_IPS` accepts IPs and CIDRs that always bypass the allowlist.
+`NFT_PORTS` supports comma-separated ports and ranges (e.g. `8920,9080-9081`). `ALWAYS_ALLOW_IPS` accepts IPv4 and IPv6 addresses and CIDRs that always bypass the allowlist. A `NFT_TABLE` of the default `inet filter` enforces both address families; use an `ip`-family table for IPv4 only or an `ip6`-family table for IPv6 only.
 
 ---
 

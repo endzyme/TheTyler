@@ -162,9 +162,11 @@ func parsePort(s string) (uint16, error) {
 	return uint16(n), nil
 }
 
-// parseStaticNets parses a comma-separated list of IPv4 addresses and/or
-// CIDR blocks. Plain addresses (no slash) are treated as /32.
-// Host bits in a CIDR are silently masked (e.g. "10.0.0.5/24" → 10.0.0.0/24).
+// parseStaticNets parses a comma-separated list of IPv4/IPv6 addresses and/or
+// CIDR blocks. Plain addresses with no slash are treated as a single host (/32
+// for IPv4, /128 for IPv6). Host bits in a CIDR are silently masked
+// (e.g. "10.0.0.5/24" → 10.0.0.0/24). Both address families are accepted; the
+// manager routes each entry to the matching family's nftables set.
 func parseStaticNets(s string) ([]*net.IPNet, error) {
 	var nets []*net.IPNet
 	for _, part := range strings.Split(s, ",") {
@@ -172,16 +174,22 @@ func parseStaticNets(s string) ([]*net.IPNet, error) {
 		if part == "" {
 			continue
 		}
-		// No slash → treat as a /32 host entry.
+		// No slash → treat as a single-host entry. The host length depends on
+		// the address family, so resolve it by parsing the bare address first.
 		if !strings.ContainsRune(part, '/') {
-			part = part + "/32"
+			ip := net.ParseIP(part)
+			if ip == nil {
+				return nil, fmt.Errorf("invalid address %q", part)
+			}
+			if ip.To4() != nil {
+				part += "/32"
+			} else {
+				part += "/128"
+			}
 		}
 		_, ipNet, err := net.ParseCIDR(part)
 		if err != nil {
 			return nil, fmt.Errorf("invalid address or CIDR %q: %w", part, err)
-		}
-		if ipNet.IP.To4() == nil {
-			return nil, fmt.Errorf("%q is not an IPv4 address or CIDR", part)
 		}
 		nets = append(nets, ipNet)
 	}
