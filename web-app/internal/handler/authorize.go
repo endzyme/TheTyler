@@ -13,6 +13,19 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-check authorization at the point of granting access. Sessions live for
+	// 30 days, so an email removed by an admin could otherwise keep adding IPs
+	// until its cookie expired.
+	authorized, err := h.db.IsEmailAuthorized(r.Context(), emailAddr)
+	if err != nil {
+		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+		return
+	}
+	if !authorized {
+		h.renderError(w, r, "Your access has been revoked. Please contact your administrator.", http.StatusForbidden)
+		return
+	}
+
 	ip := extractIP(r, h.cfg.TrustProxy)
 	if ip == "" {
 		h.renderError(w, r, "Could not determine your IP address.", http.StatusBadRequest)
