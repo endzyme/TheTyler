@@ -88,12 +88,18 @@ Owned entirely by the sync client. No other process should modify these rules.
 table inet filter {
   set allowed_ips {
     type ipv4_addr
+    elements = { }
+  }
+
+  set allowed_ips_v6 {
+    type ipv6_addr
     flags interval
     elements = { }
   }
 
   chain allowlist_8920 {
     ip saddr @allowed_ips accept
+    ip6 saddr @allowed_ips_v6 accept
     drop
   }
 
@@ -358,7 +364,33 @@ Mitigation: use a dedicated nftables chain for all system-managed rules and avoi
 
 ### IPv6
 
-The current design manages IPv4 addresses only. IPv6 support is a known gap. Users on IPv6-only networks will not be able to authorize their IP.
+Both IPv4 and IPv6 are supported. The two families cannot share a single
+nftables set (an IPv4 key is 4 bytes, an IPv6 key is 16), so the sync client
+maintains a parallel `ipv6_addr` interval set (`the_tyler_allowed_ips_v6`)
+alongside the IPv4 `the_tyler_allowed_ips` set, with a matching
+`ip6 saddr @… accept` rule ahead of the `drop`. Which families are managed
+follows the table family: an `inet` table carries both, `ip` only IPv4, `ip6`
+only IPv6.
+
+**Granularity.** An individual `/128` is not a stable identifier — privacy
+extensions (RFC 8981) rotate the host bits on home and mobile networks alike,
+and on cellular the whole `/64` is a single device's allocation. So an IPv6
+client is authorized at its **`/64` prefix**, not its exact address. The web app
+canonicalizes the source address with `net/netip` and stores the masked prefix
+(e.g. `2001:db8:abcd:1234::/64`); the sync client encodes each prefix as a
+half-open interval. This is the direct analogue of IPv4, where a single public
+address already covers an entire NAT'd household, and it keeps a user authorized
+as their address rotates within the `/64`. The prefix length is fixed at `/64`;
+detecting a client's true delegated prefix from a request is not possible (it is
+not carried in the packet), so no per-user or per-family override is attempted.
+
+**Residual limitations.** Some ISPs — notably several German providers — rotate
+the entire delegated prefix, often every 24 hours, so even the `/64` changes and
+affected users re-authorize at that cadence (the same as they already do for
+rotating IPv4 addresses); an operator whose ISP rotates within a stable `/56`
+can widen the static bypass via `ALWAYS_ALLOW_IPS`. And a mobile device reaching
+an IPv4-only service through NAT64/CGNAT may present shifting source addresses
+regardless of family — a general limitation of IP allowlisting, not an IPv6 one.
 
 ### Shared / NAT IPs
 

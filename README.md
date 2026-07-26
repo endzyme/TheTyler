@@ -71,9 +71,10 @@ Supported email providers (configured via `EMAIL_DRIVER` env var):
 
 ## Known Gaps
 
-**IPv6** — IP addresses are stored as plain strings without normalization. IPv6 representations are not canonicalized, and the nftables set type is `ipv4_addr` only. Users on IPv6-only networks cannot authorize their IP.
+**IPv6** — IPv6 is supported. Because an individual `/128` address is not stable — privacy extensions (RFC 8981) rotate the host bits on both home and mobile networks — The Tyler authorizes the **`/64` network** a client presents rather than its exact address. This mirrors the IPv4 behavior, where authorizing one public address covers a whole NAT'd household, and it keeps a user authorized as their address rotates within the `/64`. Addresses are canonicalized before storage, and the nftables sync client maintains a parallel `ipv6_addr` set alongside the IPv4 one. Two residual limitations remain:
 
-Many IPv6 networks (particularly mobile carriers) use NAT64 or similar translation mechanisms, meaning an IPv6 device accessing your service over IPv4 may present different source IPs depending on which translation pool or tower handles the connection. Allowlisting the IP seen at authorization time provides no reliable protection for subsequent requests from the same device.
+- **ISP prefix rotation.** Some ISPs (notably several German providers) rotate the entire delegated prefix, often every 24 hours, so even the `/64` changes. Affected users re-authorize at that cadence — the same experience they already have with rotating IPv4 addresses. An operator whose ISP rotates within a stable `/56` can widen the static bypass via `ALWAYS_ALLOW_IPS`.
+- **NAT64 / CGNAT.** Many mobile carriers reach IPv4-only services through NAT64 or CGNAT translation pools, so a device may present different source addresses on subsequent requests. Allowlisting the address seen at authorization time provides no reliable protection there — a fundamental limitation of IP-based allowlisting, not specific to IPv6.
 
 **Kubernetes / Container Sync Agent** — A sync agent that reconciles Kubernetes `NetworkPolicy` or `CiliumNetworkPolicy` resources is a natural extension of this design but is not yet implemented. See the nftables sync client for reference on the gRPC subscription and reconnect pattern.
 

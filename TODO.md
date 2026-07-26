@@ -1,12 +1,5 @@
 # TODO
 
-## IPv6 Support
-
-- The current IP allowlist stores and compares addresses as plain strings. IPv6 addresses have multiple valid textual representations (e.g. `::1` vs `0:0:0:0:0:0:0:1`, compressed vs full). All addresses should be normalised with `net.IP.String()` (or `netip.Addr.String()`) before storage and comparison so that equivalent addresses are treated as equal.
-- The nftables sync client writes an nftables set. Confirm the set type supports both `ipv4_addr` and `ipv6_addr` (or use `inet` family with separate sets).
-- Review `extractIP()` in `web-app/internal/handler/submit.go` — `net.ParseIP` already handles IPv6 literals, but the `X-Forwarded-For` parsing should be tested against bracketed IPv6 (`[::1]`) and zone-ID formats.
-- Test magic-link flows end-to-end from an IPv6-only client.
-
 ## Kubernetes NetworkPolicy Sync Client
 
 A client that watches the Tyler gRPC stream and reconciles a Kubernetes `NetworkPolicy` (or `CiliumNetworkPolicy`) so that only allowlisted IPs can reach protected workloads without running nftables on every node.
