@@ -1,0 +1,9 @@
+[Unit]
+Description=The Tyler auto-updater (checks GitHub Releases and applies updates)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/thetyler/update.env
+ExecStart=/opt/thetyler/bin/the-tyler-update.sh
