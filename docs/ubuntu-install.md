@@ -35,13 +35,16 @@ Download the latest release archive from GitHub:
 the-tyler_<version>_linux_amd64.tar.gz
 ```
 
-The archive contains two binaries: `thetyler` and `nftables-sync-client`. Copy both to `/opt/thetyler/bin/`:
+The archive contains the two binaries (`thetyler` and `nftables-sync-client`) and the updater script (`the-tyler-update.sh`). Copy all three to `/opt/thetyler/bin/`:
 
 ```bash
 tar -xzf the-tyler_<version>_linux_amd64.tar.gz
-cp thetyler nftables-sync-client /opt/thetyler/bin/
-chmod +x /opt/thetyler/bin/thetyler /opt/thetyler/bin/nftables-sync-client
+cp thetyler nftables-sync-client the-tyler-update.sh /opt/thetyler/bin/
+chmod +x /opt/thetyler/bin/thetyler /opt/thetyler/bin/nftables-sync-client /opt/thetyler/bin/the-tyler-update.sh
 ```
+
+`the-tyler-update.sh` is only needed if you want automatic updates (see the
+"Automatic updates" section below). It is harmless to install now regardless.
 
 ---
 
@@ -294,6 +297,97 @@ curl -I https://your.domain.com
 ```
 
 Visit `https://your.domain.com` in a browser — the auth form should load.
+
+---
+
+## 11. Automatic updates (optional)
+
+The Tyler can keep itself current by polling GitHub Releases on a systemd timer.
+When a newer tagged release appears, the updater downloads the release tarball
+for this host's architecture, verifies it against `checksums.txt`, atomically
+swaps the binaries in `/opt/thetyler/bin`, and restarts only the units whose
+binary actually changed. No inbound ports are opened — the server reaches out to
+GitHub, matching the sync client's outbound-only model.
+
+This is opt-in and per host. If you skip it, upgrading stays a manual "replace
+the binary and `systemctl restart`" as before.
+
+### Install the updater
+
+The updater script (`the-tyler-update.sh`) ships inside the release tarball and
+was copied to `/opt/thetyler/bin` in step 2. It refreshes itself from each new
+release, so you never install it by hand again after the first time.
+
+Create `/opt/thetyler/update.env`:
+
+```ini
+GITHUB_REPO=endzyme/thetyler
+INSTALL_DIR=/opt/thetyler/bin
+
+# Space-separated "binary:unit" pairs to keep updated on this host.
+# Single-box setup (web app + client together): keep both.
+COMPONENTS=thetyler:thetyler.service nftables-sync-client:thetyler-nftables.service
+
+# Optional: raises the GitHub API rate limit (unauthenticated 60/hr is plenty
+# for a 15-minute poll, so this is usually unnecessary).
+# GITHUB_TOKEN=ghp_...
+```
+
+Install the timer and its service (from `examples/systemd/` in the repo):
+
+```bash
+cp examples/systemd/the-tyler-update.service /etc/systemd/system/
+cp examples/systemd/the-tyler-update.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now the-tyler-update.timer
+```
+
+The service runs as root because it must write `/opt/thetyler/bin` and call
+`systemctl restart`. This does not change how the services themselves run — the
+web app still runs as `www-data` and the sync client still runs as the
+unprivileged `thetyler-nftables` user.
+
+### Verify
+
+```bash
+# Confirm the timer is scheduled
+systemctl list-timers the-tyler-update.timer
+
+# Run an update check immediately (instead of waiting for the timer)
+systemctl start the-tyler-update.service
+journalctl -u the-tyler-update.service --no-pager -n 30
+
+# Confirm the installed versions
+/opt/thetyler/bin/thetyler --version
+/opt/thetyler/bin/nftables-sync-client --version
+```
+
+Restarting `thetyler-nftables.service` is safe: nftables rules persist across the
+restart (the client fails open), so authorized access is never interrupted.
+Restarting `thetyler.service` causes a sub-second blip on the web app.
+
+### Rollback
+
+The updater keeps the previous binary as `<binary>.bak` before each swap. To roll
+back manually:
+
+```bash
+mv /opt/thetyler/bin/thetyler.bak /opt/thetyler/bin/thetyler
+systemctl restart thetyler
+```
+
+### Splitting the web app offsite
+
+If you later move the web app to a managed platform (Railway, Render, Fly.io)
+that deploys itself from GitHub, drop the web-app pair from `COMPONENTS` on the
+firewall host so the updater only manages the sync client:
+
+```ini
+COMPONENTS=nftables-sync-client:thetyler-nftables.service
+```
+
+The managed platform handles the web app's deploys, and the timer keeps only the
+onsite client in sync.
 
 ---
 

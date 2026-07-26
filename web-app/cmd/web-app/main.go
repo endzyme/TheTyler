@@ -111,7 +111,16 @@ func runMaintenanceOnce(ctx context.Context, database *db.DB, mailer email.Maile
 	}
 }
 
+// version is the release version, injected at build time via -ldflags
+// "-X main.version=...". Defaults to "dev" for local builds.
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-version" || os.Args[1] == "version") {
+		fmt.Println(version)
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)

@@ -13,6 +13,8 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
 
   - id: nftables-sync-client
     main: ./nftables-sync-client/cmd/nftables-sync-client
@@ -24,10 +26,21 @@ builds:
     goarch:
       - amd64
       - arm64
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
 
 archives:
   - formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Specifying `files` overrides goreleaser's defaults, so the license and
+    # readme are re-listed explicitly alongside the bundled updater script.
+    files:
+      - LICENSE
+      - README.md
+      - src: scripts/the-tyler-update.sh
+        dst: the-tyler-update.sh
+        info:
+          mode: 0755
 
 checksum:
   name_template: "checksums.txt"
