@@ -50,7 +50,7 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	expiry := time.Now().Add(h.cfg.TokenExpiry)
-	tok, err := token.Generate(h.cfg.MagicLinkSecret, emailAddr, ip, expiry)
+	tok, err := token.Generate(h.cfg.MagicLinkSecret, emailAddr, expiry)
 	if err != nil {
 		log.Printf("submit: generate token: %v", err)
 		return

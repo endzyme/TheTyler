@@ -16,12 +16,11 @@ var ErrInvalid = errors.New("token invalid")
 
 type Token struct {
 	Email  string
-	IP     string
 	Expiry time.Time
 }
 
-func Generate(secret []byte, email, ip string, expiry time.Time) (string, error) {
-	payload := email + "|" + ip + "|" + strconv.FormatInt(expiry.Unix(), 10)
+func Generate(secret []byte, email string, expiry time.Time) (string, error) {
+	payload := email + "|" + strconv.FormatInt(expiry.Unix(), 10)
 	payloadEnc := base64.RawURLEncoding.EncodeToString([]byte(payload))
 
 	mac := computeMAC(secret, payload)
@@ -51,12 +50,12 @@ func Parse(secret []byte, raw string) (*Token, error) {
 		return nil, ErrInvalid
 	}
 
-	fields := strings.SplitN(payload, "|", 3)
-	if len(fields) != 3 {
+	fields := strings.SplitN(payload, "|", 2)
+	if len(fields) != 2 {
 		return nil, ErrInvalid
 	}
 
-	unixSec, err := strconv.ParseInt(fields[2], 10, 64)
+	unixSec, err := strconv.ParseInt(fields[1], 10, 64)
 	if err != nil {
 		return nil, ErrInvalid
 	}
@@ -68,7 +67,6 @@ func Parse(secret []byte, raw string) (*Token, error) {
 
 	return &Token{
 		Email:  fields[0],
-		IP:     fields[1],
 		Expiry: expiry,
 	}, nil
 }
