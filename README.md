@@ -85,6 +85,12 @@ Many IPv6 networks (particularly mobile carriers) use NAT64 or similar translati
 
 **nftables Rule Position** — The sync agent can detect and recreate a missing jump rule but cannot safely reorder rules it does not own. A broad `drop` rule inserted above the jump rule by another process will block traffic regardless of the allowlist.
 
+## Releasing
+
+Releases are cut by pushing a `v*` git tag; CI (GoReleaser) builds the binaries,
+generates checksums and a changelog, and publishes the GitHub Release
+automatically. See [RELEASING.md](RELEASING.md) for the full process.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
