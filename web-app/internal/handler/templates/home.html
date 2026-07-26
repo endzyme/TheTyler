@@ -15,8 +15,18 @@
 {{else if .AlreadyAllowed}}
 <h1>Already Authorized</h1>
 <div class="notice success">
-  <strong>{{.IP}}</strong> is already in the allowlist. Your access has been refreshed.
+  <strong>{{.IP}}</strong> is live in the allowlist. Your access has been refreshed.
 </div>
+{{else if .Reauth}}
+<h1>Reauthorize Access</h1>
+<p>Your access for this IP address has expired. Refresh it to restore access:</p>
+<div class="notice warn">
+  <strong>{{.IP}}</strong> — expired
+</div>
+<form method="POST" action="/authorize">
+  <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+  <button type="submit">Reauthorize this IP</button>
+</form>
 {{else}}
 <h1>Authorize Access</h1>
 <p>Add your current IP address to the allowlist:</p>

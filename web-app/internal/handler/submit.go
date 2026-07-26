@@ -58,9 +58,16 @@ func (h *Handler) submit(w http.ResponseWriter, r *http.Request) {
 
 	link := fmt.Sprintf("%s/verify?token=%s", h.cfg.BaseURL, tok)
 
-	if err := h.mailer.SendMagicLink(context.Background(), emailAddr, link); err != nil {
-		log.Printf("submit: send email to %q: %v", emailAddr, err)
-	}
+	// Send asynchronously so the HTTP response timing is the same whether or not
+	// the address is authorized — a synchronous send would let an attacker
+	// distinguish registered addresses by how long the request takes.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := h.mailer.SendMagicLink(ctx, emailAddr, link); err != nil {
+			log.Printf("submit: send email to %q: %v", emailAddr, err)
+		}
+	}()
 }
 
 func extractIP(r *http.Request, trustProxy bool) string {

@@ -19,7 +19,15 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.db.AddIPRecord(r.Context(), emailAddr, ip); err != nil {
+	// Whether this IP was already known for this user determines whether we
+	// present the result as a fresh authorization or a re-authorization.
+	existing, err := h.db.GetIPRecord(r.Context(), emailAddr, ip)
+	if err != nil {
+		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.UpsertIPRecord(r.Context(), emailAddr, ip); err != nil {
 		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 		return
 	}
@@ -27,6 +35,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 	go h.grpcSrv.NotifyAll()
 
 	h.render(w, r, "authorized.html", map[string]any{
-		"IP": ip,
+		"IP":     ip,
+		"Reauth": existing != nil,
 	})
 }

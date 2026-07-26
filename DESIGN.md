@@ -189,11 +189,14 @@ For self-hosters using Proton Mail: use the `smtp` driver with `smtp.protonmail.
 
 ## TTL and Record Lifecycle
 
+- Each `(email, ip)` combination is unique — a user holds at most one record per IP. Re-authorizing or refreshing updates the existing record's `authed_at` in place rather than inserting a duplicate.
 - IP records include an `authed_at` timestamp set at authorization time
-- Records older than 90 days are excluded from `AllowlistSnapshot` responses
-- Old records are not automatically deleted from the database (they can be cleaned up later)
+- A record is **live** while `authed_at` is within the TTL (default 90 days) and **expired** once it ages past it. The admin panel shows this status per record.
+- Records that are expired are excluded from `AllowlistSnapshot` responses
 - TTL is enforced entirely on the web app side; the sync client has no TTL logic
 - When a record ages out, the next snapshot push to sync clients will omit that IP, and the nftables set will be updated atomically to remove it
+- Expired records are **not** deleted from the database. Instead the user can sign in again and refresh the same IP with a single "Reauthorize" click — no full re-authorization from scratch is required.
+- A background job emails the user once when their IP expires, telling them they can sign in to refresh it. The notification flag is cleared whenever the record is refreshed, so a future lapse notifies again. The same job prunes stale single-use token records.
 
 ---
 

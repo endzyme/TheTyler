@@ -30,6 +30,9 @@ type IPRecord struct {
 	Email    string
 	IP       string
 	AuthedAt time.Time
+	// Expired reports whether the record has aged past the configured TTL.
+	// It is a derived field, populated by read methods, not a stored column.
+	Expired bool
 }
 
 type APIKey struct {
@@ -109,15 +112,15 @@ CREATE TABLE IF NOT EXISTS used_tokens (
 		return err
 	}
 
-	if err := d.ensureAPIKeysColumn("disabled_at", "DATETIME"); err != nil {
+	if err := d.ensureColumn("api_keys", "disabled_at", "DATETIME"); err != nil {
 		return err
 	}
 
-	if err := d.ensureAPIKeysColumn("last_action_at", "DATETIME"); err != nil {
+	if err := d.ensureColumn("api_keys", "last_action_at", "DATETIME"); err != nil {
 		return err
 	}
 
-	hasRevokedAt, err := d.apiKeysHasColumn("revoked_at")
+	hasRevokedAt, err := d.tableHasColumn("api_keys", "revoked_at")
 	if err != nil {
 		return err
 	}
@@ -131,11 +134,49 @@ WHERE disabled_at IS NULL AND revoked_at IS NOT NULL
 		}
 	}
 
+	if err := d.migrateIPRecords(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (d *DB) ensureAPIKeysColumn(name, typ string) error {
-	hasColumn, err := d.apiKeysHasColumn(name)
+// migrateIPRecords adds the expiry_notified_at column, collapses any duplicate
+// (email, ip) rows left over from before uniqueness was enforced (keeping the
+// most recent authorization), and adds a UNIQUE index on (email, ip) so a user
+// can only ever hold a single record per IP.
+func (d *DB) migrateIPRecords() error {
+	if err := d.ensureColumn("ip_records", "expiry_notified_at", "DATETIME"); err != nil {
+		return err
+	}
+
+	// Dedupe existing rows before the unique index is created; keep the newest
+	// authorization for each (email, ip) pair.
+	if _, err := d.sql.Exec(`
+DELETE FROM ip_records
+WHERE id NOT IN (
+    SELECT id FROM (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY email, ip ORDER BY authed_at DESC, id DESC
+               ) AS rn
+        FROM ip_records
+    ) WHERE rn = 1
+)`); err != nil {
+		return err
+	}
+
+	if _, err := d.sql.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ip_records_email_ip ON ip_records(email, ip)`,
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (d *DB) ensureColumn(table, name, typ string) error {
+	hasColumn, err := d.tableHasColumn(table, name)
 	if err != nil {
 		return err
 	}
@@ -143,12 +184,12 @@ func (d *DB) ensureAPIKeysColumn(name, typ string) error {
 		return nil
 	}
 
-	_, err = d.sql.Exec(fmt.Sprintf(`ALTER TABLE api_keys ADD COLUMN %s %s`, name, typ))
+	_, err = d.sql.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s`, table, name, typ))
 	return err
 }
 
-func (d *DB) apiKeysHasColumn(name string) (bool, error) {
-	rows, err := d.sql.Query(`PRAGMA table_info(api_keys)`)
+func (d *DB) tableHasColumn(table, name string) (bool, error) {
+	rows, err := d.sql.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, table))
 	if err != nil {
 		return false, err
 	}
@@ -223,9 +264,18 @@ func (d *DB) ListAuthorizedEmails(ctx context.Context) ([]AuthorizedEmail, error
 
 // IPs
 
-func (d *DB) AddIPRecord(ctx context.Context, email, ip string) error {
-	_, err := d.sql.ExecContext(ctx,
-		`INSERT INTO ip_records (email, ip, authed_at) VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))`,
+// UpsertIPRecord authorizes (or re-authorizes) an (email, ip) combination.
+// A user holds at most one record per IP: a first authorization inserts a row,
+// and any subsequent authorization or refresh updates the existing row's
+// timestamp in place rather than adding a duplicate. Refreshing also clears any
+// prior expiry notification so the record can be notified again if it lapses.
+func (d *DB) UpsertIPRecord(ctx context.Context, email, ip string) error {
+	_, err := d.sql.ExecContext(ctx, `
+INSERT INTO ip_records (email, ip, authed_at, expiry_notified_at)
+VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), NULL)
+ON CONFLICT(email, ip) DO UPDATE SET
+    authed_at = excluded.authed_at,
+    expiry_notified_at = NULL`,
 		email, ip,
 	)
 	return err
@@ -251,27 +301,33 @@ func (d *DB) GetActiveIPs(ctx context.Context) ([]string, error) {
 	return ips, rows.Err()
 }
 
-func (d *DB) RefreshIPRecord(ctx context.Context, email, ip string) error {
-	_, err := d.sql.ExecContext(ctx, `
-UPDATE ip_records SET authed_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-WHERE id = (
-    SELECT id FROM ip_records WHERE email = ? AND ip = ? ORDER BY authed_at DESC LIMIT 1
-)`, email, ip)
-	return err
-}
-
-func (d *DB) IsIPActive(ctx context.Context, ip string) (bool, error) {
-	var count int
+// GetIPRecord returns the record for a specific (email, ip) combination, or
+// nil if the user has never authorized that IP. The returned record's Expired
+// field reflects whether it has aged past the TTL.
+func (d *DB) GetIPRecord(ctx context.Context, email, ip string) (*IPRecord, error) {
+	var r IPRecord
+	var authedStr string
 	err := d.sql.QueryRowContext(ctx,
-		fmt.Sprintf(`SELECT COUNT(*) FROM ip_records WHERE ip = ? AND authed_at > strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')`, d.ipTTLDays),
-		ip,
-	).Scan(&count)
-	return count > 0, err
+		fmt.Sprintf(`SELECT id, email, ip, authed_at,
+    (authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')) AS expired
+FROM ip_records WHERE email = ? AND ip = ?`, d.ipTTLDays),
+		email, ip,
+	).Scan(&r.ID, &r.Email, &r.IP, &authedStr, &r.Expired)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	r.AuthedAt, _ = time.Parse("2006-01-02T15:04:05Z", authedStr)
+	return &r, nil
 }
 
 func (d *DB) ListIPRecords(ctx context.Context) ([]IPRecord, error) {
 	rows, err := d.sql.QueryContext(ctx,
-		`SELECT id, email, ip, authed_at FROM ip_records ORDER BY authed_at DESC`,
+		fmt.Sprintf(`SELECT id, email, ip, authed_at,
+    (authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')) AS expired
+FROM ip_records ORDER BY authed_at DESC`, d.ipTTLDays),
 	)
 	if err != nil {
 		return nil, err
@@ -282,7 +338,7 @@ func (d *DB) ListIPRecords(ctx context.Context) ([]IPRecord, error) {
 	for rows.Next() {
 		var r IPRecord
 		var authedStr string
-		if err := rows.Scan(&r.ID, &r.Email, &r.IP, &authedStr); err != nil {
+		if err := rows.Scan(&r.ID, &r.Email, &r.IP, &authedStr, &r.Expired); err != nil {
 			return nil, err
 		}
 		r.AuthedAt, _ = time.Parse("2006-01-02T15:04:05Z", authedStr)
@@ -291,9 +347,53 @@ func (d *DB) ListIPRecords(ctx context.Context) ([]IPRecord, error) {
 	return out, rows.Err()
 }
 
-func (d *DB) RemoveIPRecordsByIP(ctx context.Context, ip string) error {
+// RemoveIPRecord deletes a single (email, ip) authorization. Because each user
+// holds at most one record per IP, this removes exactly one combination and
+// leaves any other user's authorization of the same IP intact.
+func (d *DB) RemoveIPRecord(ctx context.Context, email, ip string) error {
 	_, err := d.sql.ExecContext(ctx,
-		`DELETE FROM ip_records WHERE ip = ?`, ip,
+		`DELETE FROM ip_records WHERE email = ? AND ip = ?`, email, ip,
+	)
+	return err
+}
+
+// ListExpiredUnnotifiedEmails returns the distinct emails that have at least
+// one record which has aged past the TTL and has not yet had an expiry
+// notification sent.
+func (d *DB) ListExpiredUnnotifiedEmails(ctx context.Context) ([]string, error) {
+	rows, err := d.sql.QueryContext(ctx,
+		fmt.Sprintf(`SELECT DISTINCT email FROM ip_records
+WHERE expiry_notified_at IS NULL
+  AND authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')`, d.ipTTLDays),
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var emails []string
+	for rows.Next() {
+		var e string
+		if err := rows.Scan(&e); err != nil {
+			return nil, err
+		}
+		emails = append(emails, e)
+	}
+	return emails, rows.Err()
+}
+
+// MarkExpiredNotifiedForEmail stamps expiry_notified_at on all of an email's
+// currently-expired, not-yet-notified records. Records that have since been
+// refreshed (and are no longer expired) are left untouched so they can be
+// notified again if they lapse later.
+func (d *DB) MarkExpiredNotifiedForEmail(ctx context.Context, email string) error {
+	_, err := d.sql.ExecContext(ctx,
+		fmt.Sprintf(`UPDATE ip_records
+SET expiry_notified_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now')
+WHERE email = ?
+  AND expiry_notified_at IS NULL
+  AND authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')`, d.ipTTLDays),
+		email,
 	)
 	return err
 }
