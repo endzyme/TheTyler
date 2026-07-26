@@ -359,12 +359,14 @@ func (d *DB) RemoveIPRecord(ctx context.Context, email, ip string) error {
 
 // ListExpiredUnnotifiedEmails returns the distinct emails that have at least
 // one record which has aged past the TTL and has not yet had an expiry
-// notification sent.
+// notification sent. Emails no longer on the authorized list are excluded — a
+// user an admin has removed should not be invited back to refresh.
 func (d *DB) ListExpiredUnnotifiedEmails(ctx context.Context) ([]string, error) {
 	rows, err := d.sql.QueryContext(ctx,
-		fmt.Sprintf(`SELECT DISTINCT email FROM ip_records
-WHERE expiry_notified_at IS NULL
-  AND authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')`, d.ipTTLDays),
+		fmt.Sprintf(`SELECT DISTINCT ip_records.email FROM ip_records
+WHERE ip_records.expiry_notified_at IS NULL
+  AND ip_records.authed_at <= strftime('%%Y-%%m-%%dT%%H:%%M:%%SZ','now','-%d days')
+  AND ip_records.email IN (SELECT email FROM authorized_emails)`, d.ipTTLDays),
 	)
 	if err != nil {
 		return nil, err

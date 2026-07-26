@@ -84,6 +84,9 @@ func TestExpiryStatusAndNotification(t *testing.T) {
 	// (authed_at <= now), which lets us exercise the expiry paths deterministically.
 	d := openTest(t, 0)
 
+	if err := d.AddAuthorizedEmail(ctx, "a@example.com"); err != nil {
+		t.Fatalf("add email: %v", err)
+	}
 	if err := d.UpsertIPRecord(ctx, "a@example.com", "203.0.113.5"); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
@@ -136,6 +139,41 @@ func TestExpiryStatusAndNotification(t *testing.T) {
 	}
 	if len(emails) != 1 {
 		t.Fatalf("expected refresh to re-arm notification, got %v", emails)
+	}
+}
+
+// An email removed from the authorized list must not receive an expiry notice,
+// even though its expired records still linger in the DB.
+func TestExpiryNotificationSkipsUnauthorizedEmail(t *testing.T) {
+	ctx := context.Background()
+	d := openTest(t, 0) // fresh records are immediately expired
+
+	if err := d.AddAuthorizedEmail(ctx, "a@example.com"); err != nil {
+		t.Fatalf("add email: %v", err)
+	}
+	if err := d.UpsertIPRecord(ctx, "a@example.com", "203.0.113.5"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	emails, err := d.ListExpiredUnnotifiedEmails(ctx)
+	if err != nil {
+		t.Fatalf("list expired: %v", err)
+	}
+	if len(emails) != 1 || emails[0] != "a@example.com" {
+		t.Fatalf("expected authorized email to be notifiable, got %v", emails)
+	}
+
+	// Admin removes the user; their expired record still exists, but they must
+	// no longer be surfaced for notification.
+	if err := d.RemoveAuthorizedEmail(ctx, "a@example.com"); err != nil {
+		t.Fatalf("remove email: %v", err)
+	}
+	emails, err = d.ListExpiredUnnotifiedEmails(ctx)
+	if err != nil {
+		t.Fatalf("list expired 2: %v", err)
+	}
+	if len(emails) != 0 {
+		t.Fatalf("expected removed email to be skipped, got %v", emails)
 	}
 }
 
