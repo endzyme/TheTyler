@@ -48,6 +48,12 @@ func canonicalizeCIDR(s string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	// Reject the default route (0.0.0.0/0 or ::/0): assigning it would turn a
+	// key's client into allow-all and silently defeat the allowlist for that
+	// host. An admin typo should not be able to do that.
+	if ones, _ := ipNet.Mask.Size(); ones == 0 {
+		return "", false
+	}
 	return ipNet.String(), true
 }
 
@@ -373,6 +379,20 @@ func (h *Handler) adminKeyCIDRs(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
+	// Resolve the key up front. This both rejects requests for a nonexistent key
+	// (avoiding orphaned api_key_cidrs rows) and gives us the hash to target the
+	// push at just this key's connected clients.
+	hash, err := h.db.GetAPIKeyHash(ctx, id)
+	if err != nil {
+		log.Printf("admin: lookup key hash %d: %v", id, err)
+		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+		return
+	}
+	if hash == "" {
+		h.renderError(w, r, "Unknown API key.", http.StatusBadRequest)
+		return
+	}
+
 	switch action {
 	case "add":
 		if err := h.db.AddAPIKeyCIDR(ctx, id, cidr); err != nil {
@@ -392,11 +412,7 @@ func (h *Handler) adminKeyCIDRs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Push the change to just this key's connected clients.
-	if hash, err := h.db.GetAPIKeyHash(ctx, id); err != nil {
-		log.Printf("admin: lookup key hash %d: %v", id, err)
-	} else if hash != "" {
-		go h.grpcSrv.NotifyKeyHash(hash)
-	}
+	go h.grpcSrv.NotifyKeyHash(hash)
 
 	h.renderKeysPartialOrRedirect(w, r, ctx)
 }

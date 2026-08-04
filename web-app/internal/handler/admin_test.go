@@ -24,6 +24,8 @@ func TestCanonicalizeCIDR(t *testing.T) {
 		{"  10.0.0.0/8  ", "10.0.0.0/8", true},                       // trimmed
 		{"not-an-ip", "", false},
 		{"10.0.0.0/33", "", false},
+		{"0.0.0.0/0", "", false}, // default route rejected (allow-all footgun)
+		{"::/0", "", false},      // IPv6 default route rejected
 		{"", "", false},
 	}
 	for _, tc := range cases {
