@@ -123,6 +123,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/emails", h.requireAdmin(h.requireCSRF(h.adminEmails)))
 	mux.HandleFunc("POST /admin/ips", h.requireAdmin(h.requireCSRF(h.adminIPs)))
 	mux.HandleFunc("POST /admin/keys", h.requireAdmin(h.requireCSRF(h.adminKeys)))
+	mux.HandleFunc("POST /admin/keys/cidrs", h.requireAdmin(h.requireCSRF(h.adminKeyCIDRs)))
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {

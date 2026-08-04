@@ -19,9 +19,11 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
+	"go4.org/netipx"
 	"golang.org/x/sys/unix"
 
 	"github.com/endzyme/the-tyler/nftables-sync-client/internal/config"
@@ -42,10 +44,24 @@ const (
 // Manager holds the nftables table configuration and provides idempotent
 // operations for ensuring the required table structure and atomically
 // updating the IP and port sets.
+//
+// The static ("always-allowed") sets are fed from two sources that are
+// consolidated into a single non-overlapping list per family: the locally
+// configured ALWAYS_ALLOW_IPS (baseNets*) and operator CIDRs pushed by the
+// central server per API key (set via SetServerCIDRs). Consolidation is
+// mandatory — nftables interval sets reject overlapping/duplicate elements.
 type Manager struct {
 	tableName   string
 	tableFamily nftables.TableFamily
 	ports       []config.PortRange
+
+	// baseNets* are the immutable, locally-configured static networks.
+	baseNets4 []*net.IPNet
+	baseNets6 []*net.IPNet
+
+	// mu guards the effective (merged) static nets, which SetServerCIDRs can
+	// replace concurrently with Ensure reading them.
+	mu          sync.RWMutex
 	staticNets4 []*net.IPNet
 	staticNets6 []*net.IPNet
 }
@@ -55,13 +71,40 @@ type Manager struct {
 func NewManager(cfg *config.Config) *Manager {
 	family, name := parseTableConfig(cfg.NFTTable)
 	v4, v6 := splitNetsByFamily(cfg.StaticNets)
-	return &Manager{
+	m := &Manager{
 		tableName:   name,
 		tableFamily: family,
 		ports:       cfg.Ports,
-		staticNets4: v4,
-		staticNets6: v6,
+		baseNets4:   v4,
+		baseNets6:   v6,
 	}
+	// Consolidate the config-only nets up front (dedup/merge any overlaps the
+	// operator may have configured). Server CIDRs are folded in later.
+	m.SetServerCIDRs(nil)
+	return m
+}
+
+// SetServerCIDRs recomputes the effective static networks as the consolidation
+// of the locally-configured base nets and the operator CIDRs pushed from the
+// central server. Overlapping, duplicate, and adjacent ranges are merged into a
+// minimal, non-overlapping set per family so the nftables interval sets never
+// receive conflicting elements. Invalid server entries are logged and skipped.
+func (m *Manager) SetServerCIDRs(cidrs []string) {
+	sv4, sv6 := parseServerCIDRs(cidrs)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.staticNets4 = consolidateNets(concatNets(m.baseNets4, sv4))
+	m.staticNets6 = consolidateNets(concatNets(m.baseNets6, sv6))
+}
+
+// staticNetsSnapshot returns the current effective static nets under the read
+// lock, so Ensure works from a consistent view even if SetServerCIDRs runs
+// concurrently.
+func (m *Manager) staticNetsSnapshot() (v4, v6 []*net.IPNet) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.staticNets4, m.staticNets6
 }
 
 // parseTableConfig splits "inet filter" into (TableFamilyINet, "filter").
@@ -168,12 +211,14 @@ func (m *Manager) Ensure(ips []string) error {
 	}
 
 	// Phase 3: sync static sets (the_tyler_always_allowed / _v6). Always created
-	// with Interval=true to support both single hosts and CIDRs.
-	staticSet4, err := m.ensureStaticSet(conn, table, tylerStaticSetName, nftables.TypeIPAddr, m.staticNets4, m.supportsV4())
+	// with Interval=true to support both single hosts and CIDRs. The contents are
+	// the consolidated config + server CIDRs (see SetServerCIDRs).
+	staticNets4, staticNets6 := m.staticNetsSnapshot()
+	staticSet4, err := m.ensureStaticSet(conn, table, tylerStaticSetName, nftables.TypeIPAddr, staticNets4, m.supportsV4())
 	if err != nil {
 		return fmt.Errorf("ensure IPv4 static set: %w", err)
 	}
-	staticSet6, err := m.ensureStaticSet(conn, table, tylerStaticSetNameV6, nftables.TypeIP6Addr, m.staticNets6, m.supportsV6())
+	staticSet6, err := m.ensureStaticSet(conn, table, tylerStaticSetNameV6, nftables.TypeIP6Addr, staticNets6, m.supportsV6())
 	if err != nil {
 		return fmt.Errorf("ensure IPv6 static set: %w", err)
 	}
@@ -809,3 +854,97 @@ func splitNetsByFamily(nets []*net.IPNet) (v4, v6 []*net.IPNet) {
 	}
 	return v4, v6
 }
+
+// parseServerCIDRs parses operator CIDR strings pushed from the central server
+// into networks, split by family. Bare addresses are accepted and treated as a
+// single host. Invalid entries are logged and skipped so a bad server entry
+// never fails the whole reconcile.
+// This client is the enforcement point and does not assume the server has
+// already validated its payload: a bad row reaching the database directly, an
+// older server build, or a compromised server must not be able to open the
+// firewall. The default route is therefore rejected here as well as server-side,
+// and IPv4-mapped IPv6 forms are unmapped rather than being masked as 128-bit
+// addresses (which would silently widen a single host to a huge range).
+func parseServerCIDRs(cidrs []string) (v4, v6 []*net.IPNet) {
+	for _, raw := range cidrs {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+
+		var p netip.Prefix
+		if addr, err := netip.ParseAddr(s); err == nil {
+			addr = addr.Unmap()
+			if addr.Zone() != "" {
+				log.Printf("[nft] WARNING: skipping server CIDR with zone %q", raw)
+				continue
+			}
+			p = netip.PrefixFrom(addr, addr.BitLen())
+		} else {
+			p, err = netip.ParsePrefix(s)
+			if err != nil {
+				log.Printf("[nft] WARNING: skipping invalid server CIDR %q: %v", raw, err)
+				continue
+			}
+			if p.Addr().Is4In6() || p.Addr().Zone() != "" {
+				log.Printf("[nft] WARNING: skipping ambiguous server CIDR %q", raw)
+				continue
+			}
+		}
+		if p.Bits() == 0 {
+			log.Printf("[nft] WARNING: refusing default-route server CIDR %q — would allow all traffic", raw)
+			continue
+		}
+
+		ipNet := prefixToIPNet(p.Masked())
+		if p.Addr().Is4() {
+			v4 = append(v4, ipNet)
+		} else {
+			v6 = append(v6, ipNet)
+		}
+	}
+	return v4, v6
+}
+
+// concatNets returns a new slice containing all networks from a then b, without
+// mutating either input.
+func concatNets(a, b []*net.IPNet) []*net.IPNet {
+	out := make([]*net.IPNet, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	return out
+}
+
+// consolidateNets merges a (single-family) slice of networks into a minimal,
+// sorted, non-overlapping, deduplicated set of prefixes using netipx. This is
+// what keeps overlapping/duplicate CIDRs — legal in our input, illegal in an
+// nftables interval set — from reaching the kernel. On any encoding error it
+// falls back to returning the input unchanged.
+func consolidateNets(nets []*net.IPNet) []*net.IPNet {
+	if len(nets) == 0 {
+		return nil
+	}
+	var b netipx.IPSetBuilder
+	for _, n := range nets {
+		p, ok := ipNetToPrefix(n)
+		if !ok {
+			continue
+		}
+		b.AddPrefix(p.Masked())
+	}
+	set, err := b.IPSet()
+	if err != nil {
+		log.Printf("[nft] WARNING: consolidate nets failed, using unmerged list: %v", err)
+		return nets
+	}
+	prefixes := set.Prefixes()
+	out := make([]*net.IPNet, 0, len(prefixes))
+	for _, p := range prefixes {
+		out = append(out, prefixToIPNet(p))
+	}
+	return out
+}
+
+// prefixToIPNet converts a netip.Prefix back into a *net.IPNet for the existing
+// element-encoding path.
+func prefixToIPNet(p netip.Prefix) *net.IPNet { return netipx.PrefixIPNet(p) }

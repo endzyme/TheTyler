@@ -132,6 +132,8 @@
   <tbody>
   {{range .Keys}}
   {{$connected := index $.KeyConnections .KeyHash}}
+  {{$cidrs := index $.KeyCIDRs .ID}}
+  {{$keyID := .ID}}
   <tr>
     <td{{if .DisabledAt}} class="revoked"{{end}}>{{.Name}}</td>
     <td>{{.CreatedAt.Format "2006-01-02"}}</td>
@@ -160,6 +162,37 @@
         <button type="submit" class="danger" style="padding:0.2rem 0.6rem;font-size:0.8rem">Delete</button>
       </form>
       {{end}}
+    </td>
+  </tr>
+  <tr class="cidr-row">
+    <td colspan="6" style="padding-top:0;border-top:none">
+      <div style="font-size:0.85rem;color:#555">
+        <strong>Assigned networks</strong>
+        <span style="color:#888">— operator CIDRs pushed to this client, not tied to any user</span>
+        <div style="margin:0.4rem 0">
+          {{range $cidrs}}
+          <span class="cidr-chip" style="display:inline-flex;align-items:center;gap:0.3rem;margin:0 0.4rem 0.4rem 0;padding:0.15rem 0.5rem;background:#eef;border-radius:0.3rem;font-family:monospace">
+            {{.}}
+            <form hx-post="/admin/keys/cidrs" hx-target="#keys-list" hx-swap="innerHTML" style="display:inline;margin:0">
+              <input type="hidden" name="action" value="remove">
+              <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+              <input type="hidden" name="key_id" value="{{$keyID}}">
+              <input type="hidden" name="cidr" value="{{.}}">
+              <button type="submit" class="danger" title="Remove {{.}}" style="padding:0 0.35rem;font-size:0.75rem;line-height:1.2">&times;</button>
+            </form>
+          </span>
+          {{else}}
+          <span style="color:#999">None assigned.</span>
+          {{end}}
+        </div>
+        <form hx-post="/admin/keys/cidrs" hx-target="#keys-list" hx-swap="innerHTML" style="margin-top:0.2rem">
+          <input type="hidden" name="action" value="add">
+          <input type="hidden" name="csrf_token" value="{{$.CSRFToken}}">
+          <input type="hidden" name="key_id" value="{{.ID}}">
+          <input type="text" name="cidr" placeholder="203.0.113.0/24 or 2001:db8::/48" style="width:auto;display:inline-block;margin-right:0.4rem;font-family:monospace;font-size:0.8rem">
+          <button type="submit" style="padding:0.2rem 0.6rem;font-size:0.8rem">Add network</button>
+        </form>
+      </div>
     </td>
   </tr>
   {{else}}

@@ -6,13 +6,20 @@ option go_package = "github.com/endzyme/the-tyler/proto/gen/tyler/v1;tylerv1";
 
 import "google/protobuf/timestamp.proto";
 
-// AllowlistSnapshot is the full current set of authorized IPs.
-// The web app streams this to all connected sync clients whenever the
-// allowlist changes. The sync client always applies the full snapshot —
-// there are no incremental updates.
+// AllowlistSnapshot is the full current set of authorized networks for the
+// receiving client. The web app streams this to each connected sync client
+// whenever the allowlist changes. The sync client always applies the full
+// snapshot — there are no incremental updates.
 message AllowlistSnapshot {
+  // ips is the global set of user-authorized hosts (bare IPv4 addresses and
+  // IPv6 /64 prefixes). It is identical for every client.
   repeated string ips = 1;
   google.protobuf.Timestamp generated_at = 2;
+  // cidrs are operator-assigned networks scoped to the API key this stream
+  // authenticated with. They are not tied to any user and do not expire; the
+  // client consolidates them with its own local static ranges. Different keys
+  // receive different cidrs.
+  repeated string cidrs = 3;
 }
 
 message SubscribeRequest {}

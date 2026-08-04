@@ -152,6 +152,12 @@ authorization: Bearer <key>
 
 Keys are generated in the admin panel ("Add Sync Client"), stored as a bcrypt/argon2 hash server-side, and shown to the admin exactly once. The sync client is configured with the plaintext key via environment variable. Keys can be revoked from the admin panel without affecting other clients.
 
+### Per-Key Operator Networks
+
+Beyond the global user allowlist, an admin can assign **CIDR networks to a specific API key** from the admin panel (inline under each key). These are operator grants — an office range, a VPN egress, a monitoring host — that are **not tied to any user and never expire**. They are scoped to the key: each connected sync client receives only the networks assigned to the key it authenticated with, carried in the `cidrs` field of `AllowlistSnapshot` (the `ips` field remains the global, shared user allowlist).
+
+On the client these networks are consolidated with the locally-configured `ALWAYS_ALLOW_IPS` and land in the same static "always-allowed" nftables sets. Because nftables interval sets reject overlapping or duplicate elements, the client **merges** the two sources into a minimal, non-overlapping set per address family (via `go4.org/netipx`) before applying them — so a server-pushed range that overlaps a locally-configured one is coalesced rather than rejected. Editing a key's CIDRs pushes a fresh snapshot to just that key's connected clients immediately; disabling or deleting a key drops its networks along with its access.
+
 ### Magic Link Token Security
 
 Tokens are short-lived (15 minutes), single-use, and cryptographically signed server-side. The exact signing algorithm is an implementation decision (HMAC-SHA256 is the likely choice). Tokens are invalidated immediately upon use. The email containing the token is intentionally low-information — just a link with no context about what service is being protected, who sent it, or what it grants. All context is presented on the confirmation page after the link is clicked.
