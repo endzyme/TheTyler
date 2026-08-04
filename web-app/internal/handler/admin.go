@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/mail"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -32,29 +33,43 @@ func isIPOrCIDR(s string) bool {
 // prefix (/32 for IPv4, /128 for IPv6). It returns ok=false for anything that is
 // neither a valid IP nor a valid CIDR. Storing the canonical form keeps the
 // UNIQUE(api_key_id, cidr) constraint meaningful and lets remove match add.
+//
+// net/netip is used rather than net.ParseIP/ParseCIDR because the latter pair
+// mis-handles IPv4-mapped IPv6 input: net.ParseIP("::ffff:8.8.8.8").To4() is
+// non-nil, so a "/32" suffix would then be applied to a 128-bit address and
+// yield "::/32" — a vastly wider grant than the single host requested. Worse,
+// "::ffff:0:0/96" renders as "0.0.0.0/0", slipping past the default-route
+// check below. Unmapping first, and rejecting 4-in-6 prefixes outright,
+// removes that ambiguity: an IPv4 grant must be written as IPv4.
 func canonicalizeCIDR(s string) (string, bool) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", false
 	}
-	if ip := net.ParseIP(s); ip != nil {
-		if ip.To4() != nil {
-			s += "/32"
-		} else {
-			s += "/128"
+
+	// Bare address → single-host prefix.
+	if addr, err := netip.ParseAddr(s); err == nil {
+		addr = addr.Unmap()
+		if addr.Zone() != "" {
+			return "", false // link-local zones are not routable grants
 		}
+		return netip.PrefixFrom(addr, addr.BitLen()).String(), true
 	}
-	_, ipNet, err := net.ParseCIDR(s)
+
+	p, err := netip.ParsePrefix(s)
 	if err != nil {
+		return "", false
+	}
+	if p.Addr().Is4In6() || p.Addr().Zone() != "" {
 		return "", false
 	}
 	// Reject the default route (0.0.0.0/0 or ::/0): assigning it would turn a
 	// key's client into allow-all and silently defeat the allowlist for that
 	// host. An admin typo should not be able to do that.
-	if ones, _ := ipNet.Mask.Size(); ones == 0 {
+	if p.Bits() == 0 {
 		return "", false
 	}
-	return ipNet.String(), true
+	return p.Masked().String(), true
 }
 
 func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {

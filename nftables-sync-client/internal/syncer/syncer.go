@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -183,8 +184,19 @@ func (s *Syncer) runOnce(ctx context.Context) error {
 		// also drives accept-rule structure. When they change we must run a full
 		// Ensure (not the fast IP-only ApplySnapshot) so the chain rules and set
 		// membership are rebuilt for the merged config+server list.
+		//
+		// lastCIDRs tracks what the manager currently holds, and is therefore
+		// updated together with SetServerCIDRs rather than after a successful
+		// Ensure. Recording it only on success would desync the two: a failed
+		// Ensure would leave the manager holding the new set while lastCIDRs
+		// still named the old one, so a snapshot reverting to the old value
+		// would compare equal, skip SetServerCIDRs, and let the retried Ensure
+		// install CIDRs the operator had already revoked.
 		s.lastMu.Lock()
-		cidrsChanged := !equalStrings(cidrs, s.lastCIDRs)
+		cidrsChanged := !slices.Equal(cidrs, s.lastCIDRs)
+		if cidrsChanged {
+			s.lastCIDRs = cidrs
+		}
 		s.lastMu.Unlock()
 		if cidrsChanged {
 			s.nft.SetServerCIDRs(cidrs)
@@ -208,24 +220,8 @@ func (s *Syncer) runOnce(ctx context.Context) error {
 
 		s.lastMu.Lock()
 		s.lastIPs = ips
-		s.lastCIDRs = cidrs
 		s.lastMu.Unlock()
 	}
-}
-
-// equalStrings reports whether two string slices have identical contents in the
-// same order. Server CIDR lists arrive in a stable (sorted) order, so a simple
-// element-wise comparison suffices to detect changes.
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // periodicEnsure calls nft.Ensure with the last known snapshot on a fixed

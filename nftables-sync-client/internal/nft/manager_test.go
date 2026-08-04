@@ -3,6 +3,7 @@ package nft
 import (
 	"bytes"
 	"net"
+	"slices"
 	"testing"
 )
 
@@ -181,11 +182,39 @@ func TestParseServerCIDRs(t *testing.T) {
 		"garbage",              // skipped
 		"",                     // skipped
 	})
-	if got := netsToStrings(v4); len(got) != 2 {
-		t.Fatalf("v4 = %v, want 2 entries", got)
+	if got, want := netsToStrings(v4), []string{"203.0.113.0/24", "10.0.0.5/32"}; !slices.Equal(got, want) {
+		t.Fatalf("v4 = %v, want %v", got, want)
 	}
-	if got := netsToStrings(v6); len(got) != 2 {
-		t.Fatalf("v6 = %v, want 2 entries", got)
+	if got, want := netsToStrings(v6), []string{"2001:db8::/48", "2001:db8:abcd:1234::/128"}; !slices.Equal(got, want) {
+		t.Fatalf("v6 = %v, want %v", got, want)
+	}
+}
+
+// The client is the enforcement point: it must not apply an allow-all or an
+// ambiguously-widened grant even if the server sends one (stale build, row
+// written directly to the DB, or a compromised server).
+func TestParseServerCIDRsRejectsDangerousEntries(t *testing.T) {
+	v4, v6 := parseServerCIDRs([]string{
+		"0.0.0.0/0",     // default route — would allow every IPv4 source
+		"::/0",          // default route — would allow every IPv6 source
+		"::ffff:0:0/96", // v4-mapped prefix; ambiguous, renders as 0.0.0.0/0
+		"fe80::1%eth0",  // zoned link-local
+	})
+	if len(v4) != 0 || len(v6) != 0 {
+		t.Fatalf("dangerous entries were accepted: v4=%v v6=%v",
+			netsToStrings(v4), netsToStrings(v6))
+	}
+}
+
+// A v4-mapped single host must become that IPv4 /32, not a masked 128-bit
+// prefix (the naive To4()+"/32" path yields ::/32 — a vastly wider grant).
+func TestParseServerCIDRsUnmapsV4MappedHost(t *testing.T) {
+	v4, v6 := parseServerCIDRs([]string{"::ffff:8.8.8.8"})
+	if got, want := netsToStrings(v4), []string{"8.8.8.8/32"}; !slices.Equal(got, want) {
+		t.Fatalf("v4 = %v, want %v", got, want)
+	}
+	if len(v6) != 0 {
+		t.Fatalf("v6 = %v, want empty", netsToStrings(v6))
 	}
 }
 
@@ -201,7 +230,7 @@ func TestSetServerCIDRsConsolidatesWithConfig(t *testing.T) {
 	m.SetServerCIDRs([]string{"10.0.0.0/16", "2001:db8:2::/48"})
 
 	v4, v6 := m.staticNetsSnapshot()
-	if got, want := netsToStrings(v4), []string{"10.0.0.0/16"}; !equalStr(got, want) {
+	if got, want := netsToStrings(v4), []string{"10.0.0.0/16"}; !slices.Equal(got, want) {
 		t.Fatalf("v4 = %v, want %v", got, want)
 	}
 	if got := netsToStrings(v6); len(got) != 2 {
@@ -211,19 +240,7 @@ func TestSetServerCIDRsConsolidatesWithConfig(t *testing.T) {
 	// Clearing server CIDRs falls back to config-only.
 	m.SetServerCIDRs(nil)
 	v4, _ = m.staticNetsSnapshot()
-	if got, want := netsToStrings(v4), []string{"10.0.0.0/24"}; !equalStr(got, want) {
+	if got, want := netsToStrings(v4), []string{"10.0.0.0/24"}; !slices.Equal(got, want) {
 		t.Fatalf("after clear v4 = %v, want %v", got, want)
 	}
-}
-
-func equalStr(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

@@ -859,30 +859,45 @@ func splitNetsByFamily(nets []*net.IPNet) (v4, v6 []*net.IPNet) {
 // into networks, split by family. Bare addresses are accepted and treated as a
 // single host. Invalid entries are logged and skipped so a bad server entry
 // never fails the whole reconcile.
+// This client is the enforcement point and does not assume the server has
+// already validated its payload: a bad row reaching the database directly, an
+// older server build, or a compromised server must not be able to open the
+// firewall. The default route is therefore rejected here as well as server-side,
+// and IPv4-mapped IPv6 forms are unmapped rather than being masked as 128-bit
+// addresses (which would silently widen a single host to a huge range).
 func parseServerCIDRs(cidrs []string) (v4, v6 []*net.IPNet) {
 	for _, raw := range cidrs {
 		s := strings.TrimSpace(raw)
 		if s == "" {
 			continue
 		}
-		if !strings.ContainsRune(s, '/') {
-			ip := net.ParseIP(s)
-			if ip == nil {
-				log.Printf("[nft] WARNING: skipping invalid server CIDR %q", raw)
+
+		var p netip.Prefix
+		if addr, err := netip.ParseAddr(s); err == nil {
+			addr = addr.Unmap()
+			if addr.Zone() != "" {
+				log.Printf("[nft] WARNING: skipping server CIDR with zone %q", raw)
 				continue
 			}
-			if ip.To4() != nil {
-				s += "/32"
-			} else {
-				s += "/128"
+			p = netip.PrefixFrom(addr, addr.BitLen())
+		} else {
+			p, err = netip.ParsePrefix(s)
+			if err != nil {
+				log.Printf("[nft] WARNING: skipping invalid server CIDR %q: %v", raw, err)
+				continue
+			}
+			if p.Addr().Is4In6() || p.Addr().Zone() != "" {
+				log.Printf("[nft] WARNING: skipping ambiguous server CIDR %q", raw)
+				continue
 			}
 		}
-		_, ipNet, err := net.ParseCIDR(s)
-		if err != nil {
-			log.Printf("[nft] WARNING: skipping invalid server CIDR %q: %v", raw, err)
+		if p.Bits() == 0 {
+			log.Printf("[nft] WARNING: refusing default-route server CIDR %q — would allow all traffic", raw)
 			continue
 		}
-		if ipNet.IP.To4() != nil {
+
+		ipNet := prefixToIPNet(p.Masked())
+		if p.Addr().Is4() {
 			v4 = append(v4, ipNet)
 		} else {
 			v6 = append(v6, ipNet)
@@ -932,9 +947,4 @@ func consolidateNets(nets []*net.IPNet) []*net.IPNet {
 
 // prefixToIPNet converts a netip.Prefix back into a *net.IPNet for the existing
 // element-encoding path.
-func prefixToIPNet(p netip.Prefix) *net.IPNet {
-	return &net.IPNet{
-		IP:   append(net.IP(nil), p.Addr().AsSlice()...),
-		Mask: net.CIDRMask(p.Bits(), p.Addr().BitLen()),
-	}
-}
+func prefixToIPNet(p netip.Prefix) *net.IPNet { return netipx.PrefixIPNet(p) }

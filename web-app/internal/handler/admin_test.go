@@ -27,6 +27,17 @@ func TestCanonicalizeCIDR(t *testing.T) {
 		{"0.0.0.0/0", "", false}, // default route rejected (allow-all footgun)
 		{"::/0", "", false},      // IPv6 default route rejected
 		{"", "", false},
+
+		// IPv4-mapped IPv6 forms. Parsed naively (net.ParseIP + To4() + "/32"),
+		// "::ffff:8.8.8.8" would canonicalize to "::/32" — 2^96 addresses for a
+		// single-host request — and "::ffff:0:0/96" would render as "0.0.0.0/0",
+		// slipping past the default-route guard and making the client allow-all.
+		{"::ffff:8.8.8.8", "8.8.8.8/32", true},
+		{"::ffff:10.0.0.5", "10.0.0.5/32", true},
+		{"::ffff:0:0/96", "", false},
+
+		// A zoned link-local address is not a meaningful operator grant.
+		{"fe80::1%eth0", "", false},
 	}
 	for _, tc := range cases {
 		got, ok := canonicalizeCIDR(tc.in)
