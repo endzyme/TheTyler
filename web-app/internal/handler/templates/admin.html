@@ -182,7 +182,7 @@
           <tr>
             <td style="font-family:monospace">{{.IP}}</td>
             <td>
-              {{if .Version}}<span style="font-family:monospace">{{.Version}}</span>{{else}}<span style="color:#999">unknown</span>{{end}}
+              {{if .Version}}<span style="font-family:monospace">{{.Version}}</span>{{else}}<span style="color:#999" title="This client predates version reporting; update it to report its version">unknown</span>{{end}}
               {{if and .Version $.AppVersion (ne .Version $.AppVersion)}}
               <span title="Differs from web app version {{$.AppVersion}}" style="color:#c0392b;font-weight:bold">&#9888; drift</span>
               {{end}}

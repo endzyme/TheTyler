@@ -136,3 +136,45 @@ func TestKeysPartialRendersConnectedClients(t *testing.T) {
 		t.Errorf("expected exactly one drift marker, got %d\n---\n%s", n, out)
 	}
 }
+
+// TestKeysPartialHandlesPreVersionClient locks in backward compatibility: a sync
+// client built before version reporting sends no client_version, so the server
+// records an empty string. Such a connection must still render (as "unknown")
+// and must never be flagged as drift, since we cannot know whether it is current.
+func TestKeysPartialHandlesPreVersionClient(t *testing.T) {
+	tmpl, err := template.ParseFS(templatesFS, "templates/base.html", "templates/admin.html")
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+
+	data := map[string]any{
+		"Keys": []db.APIKey{
+			{ID: 7, Name: "server-1", KeyHash: "hash7", CreatedAt: time.Now()},
+		},
+		"KeyConnections": map[string]int{"hash7": 1},
+		"KeyClients": map[string][]internalgrpc.ClientConn{
+			"hash7": {
+				{IP: "203.0.113.5", Version: "", ConnectedAt: time.Date(2026, 8, 4, 9, 30, 0, 0, time.UTC)},
+			},
+		},
+		"KeyCIDRs":   map[int64][]string{},
+		"AppVersion": "v1.4.0",
+		"CSRFToken":  "tok",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "keys-partial", data); err != nil {
+		t.Fatalf("execute keys-partial: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "203.0.113.5") {
+		t.Errorf("pre-version client connection not rendered\n---\n%s", out)
+	}
+	if !strings.Contains(out, "unknown") {
+		t.Errorf("pre-version client should render as 'unknown'\n---\n%s", out)
+	}
+	if strings.Contains(out, "drift") {
+		t.Errorf("pre-version client (empty version) must not be flagged as drift\n---\n%s", out)
+	}
+}
