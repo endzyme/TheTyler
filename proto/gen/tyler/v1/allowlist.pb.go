@@ -93,7 +93,12 @@ func (x *AllowlistSnapshot) GetCidrs() []string {
 }
 
 type SubscribeRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// client_version is the release version of the connecting sync client (the
+	// value baked in at build time, e.g. "v1.4.0" or "dev"). It is reported for
+	// operator visibility on the admin panel and is otherwise not acted upon.
+	// Older clients that predate version reporting send an empty string.
+	ClientVersion string `protobuf:"bytes,1,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -128,6 +133,13 @@ func (*SubscribeRequest) Descriptor() ([]byte, []int) {
 	return file_tyler_v1_allowlist_proto_rawDescGZIP(), []int{1}
 }
 
+func (x *SubscribeRequest) GetClientVersion() string {
+	if x != nil {
+		return x.ClientVersion
+	}
+	return ""
+}
+
 var File_tyler_v1_allowlist_proto protoreflect.FileDescriptor
 
 const file_tyler_v1_allowlist_proto_rawDesc = "" +
@@ -136,8 +148,9 @@ const file_tyler_v1_allowlist_proto_rawDesc = "" +
 	"\x11AllowlistSnapshot\x12\x10\n" +
 	"\x03ips\x18\x01 \x03(\tR\x03ips\x12=\n" +
 	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x14\n" +
-	"\x05cidrs\x18\x03 \x03(\tR\x05cidrs\"\x12\n" +
-	"\x10SubscribeRequest2Z\n" +
+	"\x05cidrs\x18\x03 \x03(\tR\x05cidrs\"9\n" +
+	"\x10SubscribeRequest\x12%\n" +
+	"\x0eclient_version\x18\x01 \x01(\tR\rclientVersion2Z\n" +
 	"\x10AllowlistService\x12F\n" +
 	"\tSubscribe\x12\x1a.tyler.v1.SubscribeRequest\x1a\x1b.tyler.v1.AllowlistSnapshot0\x01B9Z7github.com/endzyme/the-tyler/proto/gen/tyler/v1;tylerv1b\x06proto3"
 

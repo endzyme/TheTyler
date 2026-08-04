@@ -173,7 +173,7 @@ func main() {
 	tylerv1.RegisterAllowlistServiceServer(grpcServer, grpcSrv)
 
 	// HTTP handlers
-	h, err := handler.New(cfg, database, mailer, grpcSrv)
+	h, err := handler.New(cfg, database, mailer, grpcSrv, version)
 	if err != nil {
 		log.Fatalf("handler: %v", err)
 	}

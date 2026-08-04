@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"log"
 	"net"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,9 +27,21 @@ type contextKey string
 const apiKeyHashContextKey contextKey = "grpc_api_key_hash"
 
 type subscriber struct {
-	ch      chan *tylerv1.AllowlistSnapshot
-	keyHash string
-	client  string
+	ch          chan *tylerv1.AllowlistSnapshot
+	keyHash     string
+	client      string
+	version     string
+	connectedAt time.Time
+}
+
+// ClientConn describes a single live sync-client connection, for admin display.
+// Connections have no stable identity beyond the source IP and the version the
+// client reported, so these are point-in-time facts about an open stream, not a
+// persistent client record.
+type ClientConn struct {
+	IP          string
+	Version     string
+	ConnectedAt time.Time
 }
 
 type wrappedServerStream struct {
@@ -87,7 +100,13 @@ func (s *Server) Subscribe(req *tylerv1.SubscribeRequest, stream tylerv1.Allowli
 	s.mu.Lock()
 	id := s.nextID
 	s.nextID++
-	s.subscribers[id] = &subscriber{ch: ch, keyHash: keyHash, client: client}
+	s.subscribers[id] = &subscriber{
+		ch:          ch,
+		keyHash:     keyHash,
+		client:      client,
+		version:     req.GetClientVersion(),
+		connectedAt: time.Now().UTC(),
+	}
 	s.mu.Unlock()
 	log.Printf("grpc: subscriber registered: id=%d method=%s client=%s", id, "/tyler.v1.AllowlistService/Subscribe", client)
 
@@ -235,6 +254,39 @@ func (s *Server) ConnectedSubscriberCountsByKeyHash() map[string]int {
 	}
 
 	return counts
+}
+
+// ConnectedClientsByKeyHash returns the currently-connected sync clients grouped
+// by API key hash. Within each key the connections are ordered oldest-first
+// (by connect time, then source IP) so the admin display is stable across
+// renders. Each entry reflects one live stream — a client that reconnects
+// appears as a new entry.
+func (s *Server) ConnectedClientsByKeyHash() map[string][]ClientConn {
+	out := map[string][]ClientConn{}
+
+	s.mu.RLock()
+	for _, sub := range s.subscribers {
+		if sub == nil || sub.keyHash == "" {
+			continue
+		}
+		out[sub.keyHash] = append(out[sub.keyHash], ClientConn{
+			IP:          sub.client,
+			Version:     sub.version,
+			ConnectedAt: sub.connectedAt,
+		})
+	}
+	s.mu.RUnlock()
+
+	for _, conns := range out {
+		sort.Slice(conns, func(i, j int) bool {
+			if !conns[i].ConnectedAt.Equal(conns[j].ConnectedAt) {
+				return conns[i].ConnectedAt.Before(conns[j].ConnectedAt)
+			}
+			return conns[i].IP < conns[j].IP
+		})
+	}
+
+	return out
 }
 
 // DisconnectRevokedSubscribers disconnects currently-subscribed stream clients
