@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/endzyme/the-tyler/web-app/internal/db"
+	internalgrpc "github.com/endzyme/the-tyler/web-app/internal/grpc"
 )
 
 func TestCanonicalizeCIDR(t *testing.T) {
@@ -80,5 +81,100 @@ func TestKeysPartialRendersCIDRs(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("keys-partial output missing %q\n---\n%s", want, out)
 		}
+	}
+}
+
+// TestKeysPartialRendersConnectedClients guards the per-connection version
+// display: each live connection for a key must show its source IP, reported
+// version, and connect time, and a version that differs from the web app's must
+// be flagged as drift.
+func TestKeysPartialRendersConnectedClients(t *testing.T) {
+	tmpl, err := template.ParseFS(templatesFS, "templates/base.html", "templates/admin.html")
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+
+	connectedAt := time.Date(2026, 8, 4, 9, 30, 0, 0, time.UTC)
+	data := map[string]any{
+		"Keys": []db.APIKey{
+			{ID: 7, Name: "server-1", KeyHash: "hash7", CreatedAt: time.Now()},
+		},
+		"KeyConnections": map[string]int{"hash7": 2},
+		"KeyClients": map[string][]internalgrpc.ClientConn{
+			"hash7": {
+				{IP: "203.0.113.5", Version: "v1.4.0", ConnectedAt: connectedAt},
+				{IP: "198.51.100.9", Version: "v1.3.0", ConnectedAt: connectedAt},
+			},
+		},
+		"KeyCIDRs":   map[int64][]string{},
+		"AppVersion": "v1.4.0",
+		"CSRFToken":  "tok",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "keys-partial", data); err != nil {
+		t.Fatalf("execute keys-partial: %v", err)
+	}
+	out := buf.String()
+
+	for _, want := range []string{
+		"Connected clients",     // the collapsible section header
+		"203.0.113.5",           // matching-version client's IP
+		"198.51.100.9",          // drifted client's IP
+		"v1.3.0",                // the drifted version string
+		"2026-08-04 09:30 UTC",  // connect time
+		"drift",                 // the mismatch marker
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("keys-partial output missing %q\n---\n%s", want, out)
+		}
+	}
+
+	// The client on the same version as the web app must not be flagged as drift.
+	// There are two connections and exactly one differs, so "drift" appears once.
+	if n := strings.Count(out, "drift"); n != 1 {
+		t.Errorf("expected exactly one drift marker, got %d\n---\n%s", n, out)
+	}
+}
+
+// TestKeysPartialHandlesPreVersionClient locks in backward compatibility: a sync
+// client built before version reporting sends no client_version, so the server
+// records an empty string. Such a connection must still render (as "unknown")
+// and must never be flagged as drift, since we cannot know whether it is current.
+func TestKeysPartialHandlesPreVersionClient(t *testing.T) {
+	tmpl, err := template.ParseFS(templatesFS, "templates/base.html", "templates/admin.html")
+	if err != nil {
+		t.Fatalf("parse templates: %v", err)
+	}
+
+	data := map[string]any{
+		"Keys": []db.APIKey{
+			{ID: 7, Name: "server-1", KeyHash: "hash7", CreatedAt: time.Now()},
+		},
+		"KeyConnections": map[string]int{"hash7": 1},
+		"KeyClients": map[string][]internalgrpc.ClientConn{
+			"hash7": {
+				{IP: "203.0.113.5", Version: "", ConnectedAt: time.Date(2026, 8, 4, 9, 30, 0, 0, time.UTC)},
+			},
+		},
+		"KeyCIDRs":   map[int64][]string{},
+		"AppVersion": "v1.4.0",
+		"CSRFToken":  "tok",
+	}
+
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, "keys-partial", data); err != nil {
+		t.Fatalf("execute keys-partial: %v", err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "203.0.113.5") {
+		t.Errorf("pre-version client connection not rendered\n---\n%s", out)
+	}
+	if !strings.Contains(out, "unknown") {
+		t.Errorf("pre-version client should render as 'unknown'\n---\n%s", out)
+	}
+	if strings.Contains(out, "drift") {
+		t.Errorf("pre-version client (empty version) must not be flagged as drift\n---\n%s", out)
 	}
 }

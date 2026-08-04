@@ -46,16 +46,19 @@ func (b bearerToken) RequireTransportSecurity() bool { return b.requireTLS }
 type Syncer struct {
 	cfg       *config.Config
 	nft       *nft.Manager
+	version   string // build version, reported to the server on subscribe
 	lastMu    sync.Mutex
 	lastIPs   []string // last received user IPs, nil until first message
 	lastCIDRs []string // last received operator CIDRs for this key
 }
 
-// New constructs a Syncer.
-func New(cfg *config.Config, nftMgr *nft.Manager) *Syncer {
+// New constructs a Syncer. version is the client's build version, reported to
+// the web app on each subscribe so operators can see it on the admin panel.
+func New(cfg *config.Config, nftMgr *nft.Manager, version string) *Syncer {
 	return &Syncer{
-		cfg: cfg,
-		nft: nftMgr,
+		cfg:     cfg,
+		nft:     nftMgr,
+		version: version,
 	}
 }
 
@@ -130,7 +133,7 @@ func (s *Syncer) runOnce(ctx context.Context) error {
 
 	client := tylerv1.NewAllowlistServiceClient(conn)
 
-	stream, err := client.Subscribe(ctx, &tylerv1.SubscribeRequest{})
+	stream, err := client.Subscribe(ctx, &tylerv1.SubscribeRequest{ClientVersion: s.version})
 	if err != nil {
 		if status.Code(err) == codes.Unauthenticated {
 			return err

@@ -22,7 +22,13 @@ message AllowlistSnapshot {
   repeated string cidrs = 3;
 }
 
-message SubscribeRequest {}
+message SubscribeRequest {
+  // client_version is the release version of the connecting sync client (the
+  // value baked in at build time, e.g. "v1.4.0" or "dev"). It is reported for
+  // operator visibility on the admin panel and is otherwise not acted upon.
+  // Older clients that predate version reporting send an empty string.
+  string client_version = 1;
+}
 
 service AllowlistService {
   // Subscribe opens a long-lived server-streaming RPC. The server pushes a

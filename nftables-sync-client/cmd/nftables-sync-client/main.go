@@ -29,7 +29,7 @@ func main() {
 	}
 
 	nftMgr := nft.NewManager(cfg)
-	s := syncer.New(cfg, nftMgr)
+	s := syncer.New(cfg, nftMgr, version)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -1,6 +1,10 @@
 {{define "content"}}
 <h1>Admin Panel</h1>
 
+<p style="margin-top:-1.5rem;margin-bottom:2rem;font-size:0.85rem;color:#555">
+  Web app version: <code style="font-family:monospace">{{if .AppVersion}}{{.AppVersion}}{{else}}unknown{{end}}</code>
+</p>
+
 {{if .NewKey}}
 {{template "new-key-notice" .}}
 {{end}}
@@ -132,6 +136,8 @@
   <tbody>
   {{range .Keys}}
   {{$connected := index $.KeyConnections .KeyHash}}
+  {{$clients := "" }}
+  {{if $.KeyClients}}{{$clients = index $.KeyClients .KeyHash}}{{end}}
   {{$cidrs := index $.KeyCIDRs .ID}}
   {{$keyID := .ID}}
   <tr>
@@ -164,6 +170,32 @@
       {{end}}
     </td>
   </tr>
+  {{if $clients}}
+  <tr class="clients-row">
+    <td colspan="6" style="padding-top:0;border-top:none">
+      <details style="font-size:0.85rem;color:#555">
+        <summary style="cursor:pointer"><strong>Connected clients</strong> ({{len $clients}})</summary>
+        <table style="margin:0.4rem 0 0.4rem 0">
+          <thead><tr><th>Source IP</th><th>Version</th><th>Connected at</th></tr></thead>
+          <tbody>
+          {{range $clients}}
+          <tr>
+            <td style="font-family:monospace">{{.IP}}</td>
+            <td>
+              {{if .Version}}<span style="font-family:monospace">{{.Version}}</span>{{else}}<span style="color:#999" title="This client predates version reporting; update it to report its version">unknown</span>{{end}}
+              {{if and .Version $.AppVersion (ne .Version $.AppVersion)}}
+              <span title="Differs from web app version {{$.AppVersion}}" style="color:#c0392b;font-weight:bold">&#9888; drift</span>
+              {{end}}
+            </td>
+            <td>{{.ConnectedAt.Format "2006-01-02 15:04 UTC"}}</td>
+          </tr>
+          {{end}}
+          </tbody>
+        </table>
+      </details>
+    </td>
+  </tr>
+  {{end}}
   <tr class="cidr-row">
     <td colspan="6" style="padding-top:0;border-top:none">
       <div style="font-size:0.85rem;color:#555">

@@ -96,13 +96,16 @@ func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keyConnections := h.grpcSrv.ConnectedSubscriberCountsByKeyHash()
+	keyClients := h.grpcSrv.ConnectedClientsByKeyHash()
 
 	h.render(w, r, "admin.html", map[string]any{
 		"Emails":         emails,
 		"IPs":            ips,
 		"Keys":           keys,
 		"KeyConnections": keyConnections,
+		"KeyClients":     keyClients,
 		"KeyCIDRs":       keyCIDRs,
+		"AppVersion":     h.version,
 	})
 }
 
@@ -120,8 +123,10 @@ func (h *Handler) keysPartialData(ctx context.Context, r *http.Request) (map[str
 	return map[string]any{
 		"Keys":           keys,
 		"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
+		"KeyClients":     h.grpcSrv.ConnectedClientsByKeyHash(),
 		"KeyCIDRs":       keyCIDRs,
 		"CSRFToken":      h.csrfToken(r),
+		"AppVersion":     h.version,
 	}, nil
 }
 

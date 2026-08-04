@@ -33,18 +33,22 @@ type Handler struct {
 	db            *db.DB
 	mailer        email.Mailer
 	grpcSrv       *internalgrpc.Server
+	version       string
 	tmplMu        sync.RWMutex
 	tmplCache     map[string]*template.Template
 	fsys          fs.FS
 	submitLimiter *rateLimiter
 }
 
-func New(cfg *config.Config, database *db.DB, mailer email.Mailer, grpcSrv *internalgrpc.Server) (*Handler, error) {
+// New constructs a Handler. version is the web app's build version, surfaced on
+// the admin panel and used to flag sync clients running a different version.
+func New(cfg *config.Config, database *db.DB, mailer email.Mailer, grpcSrv *internalgrpc.Server, version string) (*Handler, error) {
 	h := &Handler{
 		cfg:       cfg,
 		db:        database,
 		mailer:    mailer,
 		grpcSrv:   grpcSrv,
+		version:   version,
 		tmplCache: make(map[string]*template.Template),
 		// Allow 5 /submit requests per IP per 5 minutes.
 		submitLimiter: newRateLimiter(5, 5*time.Minute),
