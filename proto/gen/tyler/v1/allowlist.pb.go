@@ -22,14 +22,21 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// AllowlistSnapshot is the full current set of authorized IPs.
-// The web app streams this to all connected sync clients whenever the
-// allowlist changes. The sync client always applies the full snapshot —
-// there are no incremental updates.
+// AllowlistSnapshot is the full current set of authorized networks for the
+// receiving client. The web app streams this to each connected sync client
+// whenever the allowlist changes. The sync client always applies the full
+// snapshot — there are no incremental updates.
 type AllowlistSnapshot struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ips           []string               `protobuf:"bytes,1,rep,name=ips,proto3" json:"ips,omitempty"`
-	GeneratedAt   *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// ips is the global set of user-authorized hosts (bare IPv4 addresses and
+	// IPv6 /64 prefixes). It is identical for every client.
+	Ips         []string               `protobuf:"bytes,1,rep,name=ips,proto3" json:"ips,omitempty"`
+	GeneratedAt *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=generated_at,json=generatedAt,proto3" json:"generated_at,omitempty"`
+	// cidrs are operator-assigned networks scoped to the API key this stream
+	// authenticated with. They are not tied to any user and do not expire; the
+	// client consolidates them with its own local static ranges. Different keys
+	// receive different cidrs.
+	Cidrs         []string `protobuf:"bytes,3,rep,name=cidrs,proto3" json:"cidrs,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -78,6 +85,13 @@ func (x *AllowlistSnapshot) GetGeneratedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *AllowlistSnapshot) GetCidrs() []string {
+	if x != nil {
+		return x.Cidrs
+	}
+	return nil
+}
+
 type SubscribeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -118,10 +132,11 @@ var File_tyler_v1_allowlist_proto protoreflect.FileDescriptor
 
 const file_tyler_v1_allowlist_proto_rawDesc = "" +
 	"\n" +
-	"\x18tyler/v1/allowlist.proto\x12\btyler.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"d\n" +
+	"\x18tyler/v1/allowlist.proto\x12\btyler.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"z\n" +
 	"\x11AllowlistSnapshot\x12\x10\n" +
 	"\x03ips\x18\x01 \x03(\tR\x03ips\x12=\n" +
-	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\"\x12\n" +
+	"\fgenerated_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\vgeneratedAt\x12\x14\n" +
+	"\x05cidrs\x18\x03 \x03(\tR\x05cidrs\"\x12\n" +
 	"\x10SubscribeRequest2Z\n" +
 	"\x10AllowlistService\x12F\n" +
 	"\tSubscribe\x12\x1a.tyler.v1.SubscribeRequest\x1a\x1b.tyler.v1.AllowlistSnapshot0\x01B9Z7github.com/endzyme/the-tyler/proto/gen/tyler/v1;tylerv1b\x06proto3"

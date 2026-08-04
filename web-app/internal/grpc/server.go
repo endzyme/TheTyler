@@ -62,13 +62,15 @@ func NewServer(database *db.DB, apiKeySalt string) *Server {
 
 func (s *Server) Subscribe(req *tylerv1.SubscribeRequest, stream tylerv1.AllowlistService_SubscribeServer) error {
 	ctx := stream.Context()
+	keyHash, _ := apiKeyHashFromContext(ctx)
 
-	// Build and send initial snapshot
-	snap, err := s.buildSnapshot(ctx)
+	// Build and send initial snapshot, scoped to this connection's API key.
+	ips, err := s.buildActiveIPs(ctx)
 	if err != nil {
 		log.Printf("grpc: subscribe: build snapshot failed: client=%s err=%v", clientIP(ctx), err)
 		return status.Errorf(codes.Internal, "build snapshot: %v", err)
 	}
+	snap := s.snapshotFor(ips, s.cidrsForKeyHash(ctx, keyHash))
 	if err := stream.Send(snap); err != nil {
 		log.Printf("grpc: subscribe: initial send failed: client=%s err=%v", clientIP(ctx), err)
 		return err
@@ -76,7 +78,6 @@ func (s *Server) Subscribe(req *tylerv1.SubscribeRequest, stream tylerv1.Allowli
 
 	// Register subscriber
 	ch := make(chan *tylerv1.AllowlistSnapshot, 4)
-	keyHash, _ := apiKeyHashFromContext(ctx)
 	client := clientIP(ctx)
 	s.mu.Lock()
 	id := s.nextID
@@ -116,11 +117,15 @@ func (s *Server) Shutdown() {
 	})
 }
 
+// NotifyAll pushes a fresh snapshot to every connected subscriber. The global
+// IP list is shared, but each key's operator CIDRs differ, so a per-key snapshot
+// is assembled for each subscriber (cached by key hash to avoid re-querying the
+// same key). Use this when the global user allowlist changes.
 func (s *Server) NotifyAll() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	snap, err := s.buildSnapshot(ctx)
+	ips, err := s.buildActiveIPs(ctx)
 	if err != nil {
 		log.Printf("grpc: notify: build snapshot: %v", err)
 		return
@@ -132,10 +137,18 @@ func (s *Server) NotifyAll() {
 	total := len(s.subscribers)
 	delivered := 0
 	dropped := 0
+	// Cache assembled snapshots by key hash so subscribers sharing a key reuse
+	// one message and one CIDR lookup.
+	byKey := map[string]*tylerv1.AllowlistSnapshot{}
 
-	for _, ch := range s.subscribers {
+	for _, sub := range s.subscribers {
+		snap, ok := byKey[sub.keyHash]
+		if !ok {
+			snap = s.snapshotFor(ips, s.cidrsForKeyHash(ctx, sub.keyHash))
+			byKey[sub.keyHash] = snap
+		}
 		select {
-		case ch.ch <- snap:
+		case sub.ch <- snap:
 			delivered++
 		default:
 			// Subscriber is slow; drop this update (they'll get the next one)
@@ -143,7 +156,45 @@ func (s *Server) NotifyAll() {
 		}
 	}
 
-	log.Printf("grpc: notify: snapshot sent: ips=%d subscribers=%d delivered=%d dropped=%d", len(snap.GetIps()), total, delivered, dropped)
+	log.Printf("grpc: notify: snapshot sent: ips=%d subscribers=%d delivered=%d dropped=%d", len(ips), total, delivered, dropped)
+}
+
+// NotifyKeyHash pushes a fresh snapshot to only the subscribers connected with
+// the given API key hash. Use this when an operator changes one key's CIDRs, so
+// unrelated clients are not disturbed. A blank keyHash is a no-op.
+func (s *Server) NotifyKeyHash(keyHash string) {
+	if keyHash == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ips, err := s.buildActiveIPs(ctx)
+	if err != nil {
+		log.Printf("grpc: notify key: build snapshot: %v", err)
+		return
+	}
+	snap := s.snapshotFor(ips, s.cidrsForKeyHash(ctx, keyHash))
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	delivered := 0
+	dropped := 0
+	for _, sub := range s.subscribers {
+		if sub.keyHash != keyHash {
+			continue
+		}
+		select {
+		case sub.ch <- snap:
+			delivered++
+		default:
+			dropped++
+		}
+	}
+
+	log.Printf("grpc: notify key: snapshot sent: cidrs=%d delivered=%d dropped=%d", len(snap.GetCidrs()), delivered, dropped)
 }
 
 // ConnectedSubscriberCountsByKeyHash returns a snapshot of currently-connected
@@ -199,7 +250,9 @@ func (s *Server) DisconnectRevokedSubscribers(ctx context.Context) {
 	}
 }
 
-func (s *Server) buildSnapshot(ctx context.Context) (*tylerv1.AllowlistSnapshot, error) {
+// buildActiveIPs returns the global set of live user-authorized IPs shared by
+// every client.
+func (s *Server) buildActiveIPs(ctx context.Context) ([]string, error) {
 	ips, err := s.db.GetActiveIPs(ctx)
 	if err != nil {
 		return nil, err
@@ -207,10 +260,32 @@ func (s *Server) buildSnapshot(ctx context.Context) (*tylerv1.AllowlistSnapshot,
 	if ips == nil {
 		ips = []string{}
 	}
+	return ips, nil
+}
+
+// cidrsForKeyHash returns the operator CIDRs assigned to keyHash, or an empty
+// slice. A lookup error is logged and treated as "no CIDRs" so a snapshot is
+// still delivered (fail-open, consistent with the rest of the system).
+func (s *Server) cidrsForKeyHash(ctx context.Context, keyHash string) []string {
+	if keyHash == "" {
+		return nil
+	}
+	cidrs, err := s.db.ListCIDRsForKeyHash(ctx, keyHash)
+	if err != nil {
+		log.Printf("grpc: list cidrs for key failed: %v", err)
+		return nil
+	}
+	return cidrs
+}
+
+// snapshotFor assembles a snapshot message from a shared IP list and a key's
+// CIDRs, stamped with the current time.
+func (s *Server) snapshotFor(ips, cidrs []string) *tylerv1.AllowlistSnapshot {
 	return &tylerv1.AllowlistSnapshot{
 		Ips:         ips,
+		Cidrs:       cidrs,
 		GeneratedAt: timestamppb.New(time.Now().UTC()),
-	}, nil
+	}
 }
 
 // APIKeyInterceptor returns a gRPC stream interceptor that validates Bearer API keys.

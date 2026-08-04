@@ -44,6 +44,16 @@ type APIKey struct {
 	LastActionAt *time.Time
 }
 
+// APIKeyCIDR is an operator-assigned network scoped to a single API key. Unlike
+// user IP records it is not tied to an email and has no TTL — it is a permanent
+// allowlist grant pushed to whichever sync client authenticates with that key.
+type APIKeyCIDR struct {
+	ID        int64
+	APIKeyID  int64
+	CIDR      string
+	CreatedAt time.Time
+}
+
 func Open(dsn string, ipTTLDays int) (*DB, error) {
 	dir := filepath.Dir(dsn)
 	// Strip file: prefix and query params for directory creation
@@ -106,6 +116,14 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS used_tokens (
     token_hash TEXT PRIMARY KEY,
     used_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+);
+
+CREATE TABLE IF NOT EXISTS api_key_cidrs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id INTEGER NOT NULL,
+    cidr TEXT NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+    UNIQUE(api_key_id, cidr)
 );
 `)
 	if err != nil {
@@ -506,12 +524,117 @@ func (d *DB) EnableAPIKey(ctx context.Context, id int64) error {
 	return err
 }
 
+// DeleteDisabledAPIKey deletes a disabled key and, in the same transaction, all
+// operator CIDRs assigned to it so no orphaned grants are left behind.
 func (d *DB) DeleteDisabledAPIKey(ctx context.Context, id int64) error {
+	tx, err := d.sql.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
+		`DELETE FROM api_keys WHERE id = ? AND disabled_at IS NOT NULL`, id,
+	)
+	if err != nil {
+		return err
+	}
+	// Only clear CIDRs when a key was actually deleted (it was disabled).
+	if n, _ := res.RowsAffected(); n > 0 {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM api_key_cidrs WHERE api_key_id = ?`, id,
+		); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// API Key CIDRs
+
+// AddAPIKeyCIDR assigns an operator network to a key. The cidr should already be
+// canonicalized (masked) by the caller. Duplicate (api_key_id, cidr) pairs are
+// ignored so re-adding is a no-op.
+func (d *DB) AddAPIKeyCIDR(ctx context.Context, keyID int64, cidr string) error {
 	_, err := d.sql.ExecContext(ctx,
-		`DELETE FROM api_keys WHERE id = ? AND disabled_at IS NOT NULL`,
-		id,
+		`INSERT OR IGNORE INTO api_key_cidrs (api_key_id, cidr) VALUES (?, ?)`,
+		keyID, cidr,
 	)
 	return err
+}
+
+// RemoveAPIKeyCIDR removes a single assigned network from a key.
+func (d *DB) RemoveAPIKeyCIDR(ctx context.Context, keyID int64, cidr string) error {
+	_, err := d.sql.ExecContext(ctx,
+		`DELETE FROM api_key_cidrs WHERE api_key_id = ? AND cidr = ?`,
+		keyID, cidr,
+	)
+	return err
+}
+
+// ListAPIKeyCIDRsByKeyID returns all assigned CIDRs grouped by API key id, for
+// rendering the admin panel in a single query.
+func (d *DB) ListAPIKeyCIDRsByKeyID(ctx context.Context) (map[int64][]string, error) {
+	rows, err := d.sql.QueryContext(ctx,
+		`SELECT api_key_id, cidr FROM api_key_cidrs ORDER BY cidr`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[int64][]string{}
+	for rows.Next() {
+		var keyID int64
+		var cidr string
+		if err := rows.Scan(&keyID, &cidr); err != nil {
+			return nil, err
+		}
+		out[keyID] = append(out[keyID], cidr)
+	}
+	return out, rows.Err()
+}
+
+// ListCIDRsForKeyHash returns the operator CIDRs assigned to the key with the
+// given bcrypt key hash. Used at snapshot-build time, where the subscriber is
+// known only by its key hash. A disabled key contributes no CIDRs.
+func (d *DB) ListCIDRsForKeyHash(ctx context.Context, keyHash string) ([]string, error) {
+	rows, err := d.sql.QueryContext(ctx,
+		`SELECT c.cidr FROM api_key_cidrs c
+JOIN api_keys k ON k.id = c.api_key_id
+WHERE k.key_hash = ? AND k.disabled_at IS NULL
+ORDER BY c.cidr`,
+		keyHash,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cidrs []string
+	for rows.Next() {
+		var cidr string
+		if err := rows.Scan(&cidr); err != nil {
+			return nil, err
+		}
+		cidrs = append(cidrs, cidr)
+	}
+	return cidrs, rows.Err()
+}
+
+// GetAPIKeyHash returns the bcrypt key hash for the key with the given id, or
+// an empty string if no such key exists. Used to target snapshot pushes at the
+// subscribers connected with a specific key after its CIDRs change.
+func (d *DB) GetAPIKeyHash(ctx context.Context, id int64) (string, error) {
+	var hash string
+	err := d.sql.QueryRowContext(ctx,
+		`SELECT key_hash FROM api_keys WHERE id = ?`, id,
+	).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return hash, err
 }
 
 func (d *DB) MarkAPIKeyActivityByHash(ctx context.Context, keyHash string) error {

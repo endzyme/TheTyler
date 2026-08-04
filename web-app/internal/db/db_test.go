@@ -17,6 +17,80 @@ func openTest(t *testing.T, ttlDays int) *DB {
 	return d
 }
 
+// Operator CIDRs are scoped per API key, deduped, hidden while the key is
+// disabled, and removed when the key is deleted.
+func TestAPIKeyCIDRs(t *testing.T) {
+	ctx := context.Background()
+	d := openTest(t, 90)
+
+	id, err := d.CreateAPIKey(ctx, "server-1", "hash-1")
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+
+	// Add two CIDRs; re-adding one is a no-op (UNIQUE + INSERT OR IGNORE).
+	for _, c := range []string{"203.0.113.0/24", "10.0.0.0/8", "203.0.113.0/24"} {
+		if err := d.AddAPIKeyCIDR(ctx, id, c); err != nil {
+			t.Fatalf("add cidr %q: %v", c, err)
+		}
+	}
+
+	byKey, err := d.ListAPIKeyCIDRsByKeyID(ctx)
+	if err != nil {
+		t.Fatalf("list by key id: %v", err)
+	}
+	if got := len(byKey[id]); got != 2 {
+		t.Fatalf("expected 2 CIDRs for key, got %d (%v)", got, byKey[id])
+	}
+
+	hash, err := d.GetAPIKeyHash(ctx, id)
+	if err != nil || hash != "hash-1" {
+		t.Fatalf("GetAPIKeyHash = (%q, %v), want (hash-1, nil)", hash, err)
+	}
+
+	cidrs, err := d.ListCIDRsForKeyHash(ctx, "hash-1")
+	if err != nil {
+		t.Fatalf("list for hash: %v", err)
+	}
+	if len(cidrs) != 2 {
+		t.Fatalf("expected 2 CIDRs for active key hash, got %d", len(cidrs))
+	}
+
+	// A disabled key contributes no CIDRs to a snapshot.
+	if err := d.DisableAPIKey(ctx, id); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if cidrs, _ := d.ListCIDRsForKeyHash(ctx, "hash-1"); len(cidrs) != 0 {
+		t.Fatalf("disabled key should contribute 0 CIDRs, got %d", len(cidrs))
+	}
+	if err := d.EnableAPIKey(ctx, id); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	// Remove one CIDR.
+	if err := d.RemoveAPIKeyCIDR(ctx, id, "10.0.0.0/8"); err != nil {
+		t.Fatalf("remove cidr: %v", err)
+	}
+	if cidrs, _ := d.ListCIDRsForKeyHash(ctx, "hash-1"); len(cidrs) != 1 || cidrs[0] != "203.0.113.0/24" {
+		t.Fatalf("after remove got %v, want [203.0.113.0/24]", cidrs)
+	}
+
+	// Deleting a disabled key cascades to its CIDRs.
+	if err := d.DisableAPIKey(ctx, id); err != nil {
+		t.Fatalf("disable before delete: %v", err)
+	}
+	if err := d.DeleteDisabledAPIKey(ctx, id); err != nil {
+		t.Fatalf("delete key: %v", err)
+	}
+	byKey, err = d.ListAPIKeyCIDRsByKeyID(ctx)
+	if err != nil {
+		t.Fatalf("list after delete: %v", err)
+	}
+	if got := len(byKey[id]); got != 0 {
+		t.Fatalf("expected CIDRs purged after key delete, got %d", got)
+	}
+}
+
 // A user authorizing the same IP repeatedly must not accumulate duplicate rows
 // (bug: refresh added a new record every time).
 func TestUpsertIPRecordDedupes(t *testing.T) {

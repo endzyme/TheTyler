@@ -103,3 +103,127 @@ func TestNetsToElementsMixedFamilies(t *testing.T) {
 		t.Fatalf("v6 start key len = %d, want 16", len(elems[2].Key))
 	}
 }
+
+func netsToStrings(nets []*net.IPNet) []string {
+	out := make([]string, len(nets))
+	for i, n := range nets {
+		out[i] = n.String()
+	}
+	return out
+}
+
+func mustCIDR(t *testing.T, s string) *net.IPNet {
+	t.Helper()
+	_, n, err := net.ParseCIDR(s)
+	if err != nil {
+		t.Fatalf("parse %q: %v", s, err)
+	}
+	return n
+}
+
+func TestConsolidateNetsMergesOverlapsAndDupes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "exact duplicate collapses",
+			in:   []string{"10.0.0.0/24", "10.0.0.0/24"},
+			want: []string{"10.0.0.0/24"},
+		},
+		{
+			name: "subnet absorbed by supernet",
+			in:   []string{"10.0.0.0/24", "10.0.0.0/16"},
+			want: []string{"10.0.0.0/16"},
+		},
+		{
+			name: "adjacent halves coalesce",
+			in:   []string{"10.0.0.0/25", "10.0.0.128/25"},
+			want: []string{"10.0.0.0/24"},
+		},
+		{
+			name: "disjoint ranges preserved and sorted",
+			in:   []string{"192.0.2.0/24", "10.0.0.0/24"},
+			want: []string{"10.0.0.0/24", "192.0.2.0/24"},
+		},
+		{
+			name: "ipv6 overlap collapses",
+			in:   []string{"2001:db8::/48", "2001:db8::/32"},
+			want: []string{"2001:db8::/32"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			in := make([]*net.IPNet, len(tc.in))
+			for i, s := range tc.in {
+				in[i] = mustCIDR(t, s)
+			}
+			got := netsToStrings(consolidateNets(in))
+			if len(got) != len(tc.want) {
+				t.Fatalf("consolidateNets(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("consolidateNets(%v) = %v, want %v", tc.in, got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestParseServerCIDRs(t *testing.T) {
+	v4, v6 := parseServerCIDRs([]string{
+		"203.0.113.0/24",
+		"10.0.0.5",             // bare IPv4 -> /32
+		"2001:db8::/48",        // v6 CIDR
+		"2001:db8:abcd:1234::", // bare IPv6 -> /128
+		"garbage",              // skipped
+		"",                     // skipped
+	})
+	if got := netsToStrings(v4); len(got) != 2 {
+		t.Fatalf("v4 = %v, want 2 entries", got)
+	}
+	if got := netsToStrings(v6); len(got) != 2 {
+		t.Fatalf("v6 = %v, want 2 entries", got)
+	}
+}
+
+// TestSetServerCIDRsConsolidatesWithConfig verifies the whole merge: a locally
+// configured static net plus an overlapping server-pushed CIDR collapse into a
+// single non-overlapping entry in the effective static set.
+func TestSetServerCIDRsConsolidatesWithConfig(t *testing.T) {
+	m := &Manager{
+		baseNets4: []*net.IPNet{mustCIDR(t, "10.0.0.0/24")},
+		baseNets6: []*net.IPNet{mustCIDR(t, "2001:db8:1::/48")},
+	}
+	// Server pushes a supernet of the config v4 net and a fresh v6 net.
+	m.SetServerCIDRs([]string{"10.0.0.0/16", "2001:db8:2::/48"})
+
+	v4, v6 := m.staticNetsSnapshot()
+	if got, want := netsToStrings(v4), []string{"10.0.0.0/16"}; !equalStr(got, want) {
+		t.Fatalf("v4 = %v, want %v", got, want)
+	}
+	if got := netsToStrings(v6); len(got) != 2 {
+		t.Fatalf("v6 = %v, want 2 disjoint /48s", got)
+	}
+
+	// Clearing server CIDRs falls back to config-only.
+	m.SetServerCIDRs(nil)
+	v4, _ = m.staticNetsSnapshot()
+	if got, want := netsToStrings(v4), []string{"10.0.0.0/24"}; !equalStr(got, want) {
+		t.Fatalf("after clear v4 = %v, want %v", got, want)
+	}
+}
+
+func equalStr(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

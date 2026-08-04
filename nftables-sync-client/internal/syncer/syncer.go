@@ -43,10 +43,11 @@ func (b bearerToken) RequireTransportSecurity() bool { return b.requireTLS }
 
 // Syncer manages the gRPC subscription loop and the periodic ensure goroutine.
 type Syncer struct {
-	cfg     *config.Config
-	nft     *nft.Manager
-	lastMu  sync.Mutex
-	lastIPs []string // last received snapshot, nil until first message
+	cfg       *config.Config
+	nft       *nft.Manager
+	lastMu    sync.Mutex
+	lastIPs   []string // last received user IPs, nil until first message
+	lastCIDRs []string // last received operator CIDRs for this key
 }
 
 // New constructs a Syncer.
@@ -174,8 +175,21 @@ func (s *Syncer) runOnce(ctx context.Context) error {
 		}
 
 		ips := snapshot.GetIps()
-		log.Printf("[syncer] received snapshot: %d IPs (generated_at=%s)",
-			len(ips), snapshot.GetGeneratedAt().AsTime().Format(time.RFC3339))
+		cidrs := snapshot.GetCidrs()
+		log.Printf("[syncer] received snapshot: %d IPs, %d operator CIDRs (generated_at=%s)",
+			len(ips), len(cidrs), snapshot.GetGeneratedAt().AsTime().Format(time.RFC3339))
+
+		// Operator CIDRs feed the static "always-allowed" sets, whose presence
+		// also drives accept-rule structure. When they change we must run a full
+		// Ensure (not the fast IP-only ApplySnapshot) so the chain rules and set
+		// membership are rebuilt for the merged config+server list.
+		s.lastMu.Lock()
+		cidrsChanged := !equalStrings(cidrs, s.lastCIDRs)
+		s.lastMu.Unlock()
+		if cidrsChanged {
+			s.nft.SetServerCIDRs(cidrs)
+			needsEnsure = true
+		}
 
 		if needsEnsure {
 			if err := s.nft.Ensure(ips); err != nil {
@@ -194,8 +208,24 @@ func (s *Syncer) runOnce(ctx context.Context) error {
 
 		s.lastMu.Lock()
 		s.lastIPs = ips
+		s.lastCIDRs = cidrs
 		s.lastMu.Unlock()
 	}
+}
+
+// equalStrings reports whether two string slices have identical contents in the
+// same order. Server CIDR lists arrive in a stable (sorted) order, so a simple
+// element-wise comparison suffices to detect changes.
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // periodicEnsure calls nft.Ensure with the last known snapshot on a fixed

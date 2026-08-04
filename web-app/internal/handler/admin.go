@@ -27,6 +27,30 @@ func isIPOrCIDR(s string) bool {
 	return err == nil
 }
 
+// canonicalizeCIDR validates an operator-assigned network and returns it in
+// canonical, host-bits-masked form. A bare address is promoted to a single-host
+// prefix (/32 for IPv4, /128 for IPv6). It returns ok=false for anything that is
+// neither a valid IP nor a valid CIDR. Storing the canonical form keeps the
+// UNIQUE(api_key_id, cidr) constraint meaningful and lets remove match add.
+func canonicalizeCIDR(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", false
+	}
+	if ip := net.ParseIP(s); ip != nil {
+		if ip.To4() != nil {
+			s += "/32"
+		} else {
+			s += "/128"
+		}
+	}
+	_, ipNet, err := net.ParseCIDR(s)
+	if err != nil {
+		return "", false
+	}
+	return ipNet.String(), true
+}
+
 func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
@@ -45,6 +69,11 @@ func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {
 		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 		return
 	}
+	keyCIDRs, err := h.db.ListAPIKeyCIDRsByKeyID(ctx)
+	if err != nil {
+		h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+		return
+	}
 	keyConnections := h.grpcSrv.ConnectedSubscriberCountsByKeyHash()
 
 	h.render(w, r, "admin.html", map[string]any{
@@ -52,7 +81,27 @@ func (h *Handler) admin(w http.ResponseWriter, r *http.Request) {
 		"IPs":            ips,
 		"Keys":           keys,
 		"KeyConnections": keyConnections,
+		"KeyCIDRs":       keyCIDRs,
 	})
+}
+
+// keysPartialData assembles the data the "keys-partial" template needs: the key
+// list, live connection counts, per-key assigned CIDRs, and a CSRF token.
+func (h *Handler) keysPartialData(ctx context.Context, r *http.Request) (map[string]any, error) {
+	keys, err := h.db.ListAPIKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	keyCIDRs, err := h.db.ListAPIKeyCIDRsByKeyID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"Keys":           keys,
+		"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
+		"KeyCIDRs":       keyCIDRs,
+		"CSRFToken":      h.csrfToken(r),
+	}, nil
 }
 
 func (h *Handler) adminEmails(w http.ResponseWriter, r *http.Request) {
@@ -207,21 +256,15 @@ func (h *Handler) adminKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		keys, err := h.db.ListAPIKeys(ctx)
+		data, err := h.keysPartialData(ctx, r)
 		if err != nil {
 			log.Printf("admin: list keys after create: %v", err)
 			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
 			return
 		}
-
-		data := map[string]any{
-			"Keys":           keys,
-			"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
-			"NewKey":         key,
-			"NewKeyID":       id,
-			"NewKeyName":     name,
-			"CSRFToken":      h.csrfToken(r),
-		}
+		data["NewKey"] = key
+		data["NewKeyID"] = id
+		data["NewKeyName"] = name
 
 		if r.Header.Get("HX-Request") == "true" {
 			h.renderFragment(w, "admin.html", "keys-partial", data)
@@ -253,21 +296,7 @@ func (h *Handler) adminKeys(w http.ResponseWriter, r *http.Request) {
 			h.grpcSrv.DisconnectRevokedSubscribers(disconnectCtx)
 		}()
 
-		if r.Header.Get("HX-Request") == "true" {
-			keys, err := h.db.ListAPIKeys(ctx)
-			if err != nil {
-				h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
-				return
-			}
-			h.renderFragment(w, "admin.html", "keys-partial", map[string]any{
-				"Keys":           keys,
-				"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
-				"CSRFToken":      h.csrfToken(r),
-			})
-			return
-		}
-
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		h.renderKeysPartialOrRedirect(w, r, ctx)
 
 	case "enable":
 		idStr := r.FormValue("id")
@@ -282,21 +311,7 @@ func (h *Handler) adminKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if r.Header.Get("HX-Request") == "true" {
-			keys, err := h.db.ListAPIKeys(ctx)
-			if err != nil {
-				h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
-				return
-			}
-			h.renderFragment(w, "admin.html", "keys-partial", map[string]any{
-				"Keys":           keys,
-				"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
-				"CSRFToken":      h.csrfToken(r),
-			})
-			return
-		}
-
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		h.renderKeysPartialOrRedirect(w, r, ctx)
 
 	case "delete":
 		idStr := r.FormValue("id")
@@ -311,23 +326,77 @@ func (h *Handler) adminKeys(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if r.Header.Get("HX-Request") == "true" {
-			keys, err := h.db.ListAPIKeys(ctx)
-			if err != nil {
-				h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
-				return
-			}
-			h.renderFragment(w, "admin.html", "keys-partial", map[string]any{
-				"Keys":           keys,
-				"KeyConnections": h.grpcSrv.ConnectedSubscriberCountsByKeyHash(),
-				"CSRFToken":      h.csrfToken(r),
-			})
-			return
-		}
-
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		h.renderKeysPartialOrRedirect(w, r, ctx)
 
 	default:
 		h.renderError(w, r, "Unknown action.", http.StatusBadRequest)
 	}
+}
+
+// renderKeysPartialOrRedirect re-renders the keys-partial fragment for HTMX
+// requests, or redirects to /admin for a full page load. Shared by every
+// mutating key/CIDR action.
+func (h *Handler) renderKeysPartialOrRedirect(w http.ResponseWriter, r *http.Request, ctx context.Context) {
+	if r.Header.Get("HX-Request") == "true" {
+		data, err := h.keysPartialData(ctx, r)
+		if err != nil {
+			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+			return
+		}
+		h.renderFragment(w, "admin.html", "keys-partial", data)
+		return
+	}
+	http.Redirect(w, r, "/admin", http.StatusSeeOther)
+}
+
+// adminKeyCIDRs handles assigning and removing operator networks for a single
+// API key. On success it pushes a fresh snapshot to that key's connected sync
+// clients so the change lands in nftables within seconds.
+func (h *Handler) adminKeyCIDRs(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		h.renderError(w, r, "Bad request.", http.StatusBadRequest)
+		return
+	}
+
+	action := r.FormValue("action")
+	idStr := r.FormValue("key_id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		h.renderError(w, r, "Invalid key ID.", http.StatusBadRequest)
+		return
+	}
+	cidr, ok := canonicalizeCIDR(r.FormValue("cidr"))
+	if !ok {
+		h.renderError(w, r, "Invalid IP address or CIDR.", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+
+	switch action {
+	case "add":
+		if err := h.db.AddAPIKeyCIDR(ctx, id, cidr); err != nil {
+			log.Printf("admin: add cidr %q to key %d: %v", cidr, id, err)
+			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+			return
+		}
+	case "remove":
+		if err := h.db.RemoveAPIKeyCIDR(ctx, id, cidr); err != nil {
+			log.Printf("admin: remove cidr %q from key %d: %v", cidr, id, err)
+			h.renderError(w, r, "Internal error.", http.StatusInternalServerError)
+			return
+		}
+	default:
+		h.renderError(w, r, "Unknown action.", http.StatusBadRequest)
+		return
+	}
+
+	// Push the change to just this key's connected clients.
+	if hash, err := h.db.GetAPIKeyHash(ctx, id); err != nil {
+		log.Printf("admin: lookup key hash %d: %v", id, err)
+	} else if hash != "" {
+		go h.grpcSrv.NotifyKeyHash(hash)
+	}
+
+	h.renderKeysPartialOrRedirect(w, r, ctx)
 }
