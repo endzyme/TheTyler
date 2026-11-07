@@ -1,0 +1,31 @@
+name: Vulncheck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Advisories are published independently of our commits; check weekly so a
+  # new one is caught without waiting for the next change.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.work
+          cache: true
+          cache-dependency-path: "**/go.sum"
+
+      # Fails when a known vulnerability is reachable from our code, including
+      # ones in the Go standard library of the pinned toolchain.
+      - name: govulncheck
+        run: |
+          (cd web-app && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...)
+          (cd nftables-sync-client && go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...)

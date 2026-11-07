@@ -3,6 +3,7 @@ module github.com/endzyme/the-tyler/web-app
 go 1.27.0
 
 require (
+	github.com/endzyme/the-tyler/proto/gen v0.0.0
 	golang.org/x/crypto v0.58.0
 	google.golang.org/grpc v1.85.0
 	google.golang.org/protobuf v1.36.12
@@ -23,3 +24,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace github.com/endzyme/the-tyler/proto/gen => ../proto/gen

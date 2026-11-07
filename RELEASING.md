@@ -52,6 +52,17 @@ That's it — the tag push is the entire trigger.
   strips the leading `v` in archive names, so `v1.2.3` produces
   `the-tyler_1.2.3_linux_amd64.tar.gz`.
 
+## Go toolchain and dependencies
+
+- The Go version used by CI and releases is the `toolchain` line in `go.work`
+  (`actions/setup-go` reads it and pins `GOTOOLCHAIN=local`). Bump it by hand
+  when a Go patch release ships — Dependabot updates `go.mod` requirements but
+  not the `toolchain` line.
+- Dependabot opens weekly PRs for Go modules and GitHub Actions; the
+  **Vulncheck** workflow runs govulncheck on every PR and weekly on `main`.
+  A red scheduled Vulncheck run means a new advisory affects the code or the
+  pinned toolchain and warrants a patch release.
+
 ## Changelog
 
 GoReleaser builds the release changelog from commit subjects since the last tag,

@@ -3,6 +3,7 @@ module github.com/endzyme/the-tyler/nftables-sync-client
 go 1.27.0
 
 require (
+	github.com/endzyme/the-tyler/proto/gen v0.0.0
 	github.com/google/nftables v0.3.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
 	golang.org/x/sys v0.49.0
@@ -19,3 +20,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+replace github.com/endzyme/the-tyler/proto/gen => ../proto/gen

@@ -15,10 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.work
           cache: true
+          cache-dependency-path: "**/go.sum"
 
       - name: Build web-app
         run: go build -o /tmp/thetyler ./web-app/cmd/web-app
@@ -36,20 +37,3 @@ jobs:
           go test ./web-app/...
           go test ./nftables-sync-client/...
 
-  vulncheck:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.work
-          cache: true
-
-      # Fails the build when a known vulnerability is reachable from our code,
-      # including ones in the Go standard library of the pinned toolchain.
-      - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
-          (cd web-app && govulncheck ./...)
-          (cd nftables-sync-client && govulncheck ./...)

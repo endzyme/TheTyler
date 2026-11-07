@@ -16,10 +16,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.work
           cache: true
+          cache-dependency-path: "**/go.sum"
 
       - uses: goreleaser/goreleaser-action@v6
         with:
