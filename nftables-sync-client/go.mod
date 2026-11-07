@@ -1,6 +1,6 @@
 module github.com/endzyme/the-tyler/nftables-sync-client
 
-go 1.26.0
+go 1.27.0
 
 require (
 	github.com/google/nftables v0.3.0
