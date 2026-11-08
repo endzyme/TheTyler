@@ -127,7 +127,7 @@ func main() {
 	}
 
 	// Open database
-	dsn := fmt.Sprintf("file:%s?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=on", cfg.DatabaseURL)
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", cfg.DatabaseURL)
 	database, err := db.Open(dsn, cfg.IPTTLDays)
 	if err != nil {
 		log.Fatalf("db: %v", err)

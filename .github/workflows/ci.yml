@@ -15,10 +15,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.work
           cache: true
+          cache-dependency-path: "**/go.sum"
 
       - name: Build web-app
         run: go build -o /tmp/thetyler ./web-app/cmd/web-app
@@ -35,3 +36,4 @@ jobs:
         run: |
           go test ./web-app/...
           go test ./nftables-sync-client/...
+

@@ -92,6 +92,13 @@ SMTP_FROM=you@gmail.com
 
 `TRUST_PROXY=true` is required when Caddy (or any reverse proxy) sits in front of the app.
 
+The SQLite database runs in WAL mode: while the app is running, recent writes
+live in `app.db-wal` next to `app.db`, so the data directory must be writable by
+the app user. To back it up, either stop `thetyler` first (a clean shutdown
+folds the WAL into `app.db`) or copy it online with
+`sqlite3 /opt/thetyler/data/app.db ".backup /path/to/backup.db"`. Copying
+`app.db` alone while the app runs can miss recent writes.
+
 ---
 
 ## 4. Configure the sync client
@@ -187,6 +194,42 @@ The sync client creates and manages the `thetyler_allowlist` chain and the assoc
 ## 6. Install Caddy
 
 Follow the [Debian/Ubuntu install instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian) from the Caddy docs to add the official apt repository and install the package.
+
+### Keep Caddy patched
+
+Caddy terminates TLS for the public site, so it should pick up security
+releases without waiting on a manual `apt upgrade`. Ubuntu's
+`unattended-upgrades` only covers the Ubuntu archive by default; the Caddy
+repository has to be added explicitly.
+
+Find the origin and label of the Caddy repository:
+
+```bash
+apt-cache policy caddy
+```
+
+Look for the `release` line of the Caddy repository entry and note its `o=`
+(origin) and `l=` (label) values. Create
+`/etc/apt/apt.conf.d/51unattended-upgrades-caddy` with those values, so that
+only the Caddy repository is matched and not every repository hosted on the same
+service:
+
+```
+Unattended-Upgrade::Origins-Pattern {
+    "origin=<o= value>,label=<l= value>";
+};
+```
+
+Confirm it is picked up (run as root; the output should list `caddy` when an
+update is pending):
+
+```bash
+sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i caddy
+```
+
+The package restarts `caddy.service` on upgrade. Check the running version with
+`caddy version` and compare it against the
+[Caddy releases page](https://github.com/caddyserver/caddy/releases).
 
 ---
 
