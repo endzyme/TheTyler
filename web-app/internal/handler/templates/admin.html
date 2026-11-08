@@ -38,41 +38,14 @@
   <button type="submit">Create key</button>
 </form>
 
-<script>
-  async function copyAPIKey(button) {
-    const key = button && button.dataset ? button.dataset.key : "";
-    if (!key) return;
-
-    try {
-      await navigator.clipboard.writeText(key);
-    } catch (_) {
-      const el = document.createElement("textarea");
-      el.value = key;
-      el.setAttribute("readonly", "");
-      el.style.position = "absolute";
-      el.style.left = "-9999px";
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand("copy");
-      document.body.removeChild(el);
-    }
-
-    const original = button.textContent;
-    button.textContent = "Copied!";
-    button.disabled = true;
-    setTimeout(() => {
-      button.textContent = original;
-      button.disabled = false;
-    }, 1200);
-  }
-</script>
+<script src="/static/admin.js" defer></script>
 {{end}}
 
 {{define "new-key-notice"}}
 <div class="notice success">
   <strong>API key "{{.NewKeyName}}" created.</strong> Copy it now — it will not be shown again:<br>
   <div class="key-display" style="margin-top:0.5rem">{{.NewKey}}</div>
-  <button type="button" data-key="{{.NewKey}}" onclick="copyAPIKey(this)" style="margin-top:0.6rem">Copy key</button>
+  <button type="button" data-copy-key="{{.NewKey}}" style="margin-top:0.6rem">Copy key</button>
 </div>
 {{end}}
 

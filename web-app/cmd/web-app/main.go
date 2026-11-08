@@ -41,6 +41,10 @@ func logRequests(next http.Handler) http.Handler {
 	})
 }
 
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; " +
+	"style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; " +
+	"form-action 'self'; frame-ancestors 'none'"
+
 func securityHeaders(cfg *config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -50,9 +54,10 @@ func securityHeaders(cfg *config.Config, next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		// Deny embedding in iframes (clickjacking protection).
 		h.Set("X-Frame-Options", "DENY")
-		// Restrict resource loading; allow htmx from unpkg (trusted CDN).
-		h.Set("Content-Security-Policy",
-			"default-src 'self'; script-src 'self' https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+		// Restrict resource loading. Scripts (htmx, admin.js) are self-hosted,
+		// so script-src is 'self' only: no CDN, no inline scripts or handlers.
+		// style-src still needs 'unsafe-inline' for template style attributes.
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
 		// Only send HSTS when the server is reached over TLS.
 		if cfg.SecureCookie {
 			h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")

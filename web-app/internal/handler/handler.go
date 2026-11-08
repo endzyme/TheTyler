@@ -28,6 +28,16 @@ var templatesFS embed.FS
 //go:embed static/favicon.svg
 var faviconSVG []byte
 
+// htmx is self-hosted (rather than loaded from a CDN) so the CSP can restrict
+// script-src to 'self'. The version is in the filename, so it can be cached
+// indefinitely; bump the filename when upgrading.
+//
+//go:embed static/htmx-2.0.4.min.js
+var htmxJS []byte
+
+//go:embed static/admin.js
+var adminJS []byte
+
 type Handler struct {
 	cfg           *config.Config
 	db            *db.DB
@@ -118,6 +128,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		w.Write(faviconSVG)
 	})
+	mux.HandleFunc("GET /static/htmx-2.0.4.min.js", serveJS(htmxJS, "public, max-age=31536000, immutable"))
+	// admin.js changes between releases without a filename change; revalidate.
+	mux.HandleFunc("GET /static/admin.js", serveJS(adminJS, "no-cache"))
 	mux.HandleFunc("GET /", h.home)
 	mux.HandleFunc("POST /submit", h.submit)
 	mux.HandleFunc("GET /verify", h.verify)
@@ -227,5 +240,13 @@ func (h *Handler) requireAdmin(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		next(w, r)
+	}
+}
+
+func serveJS(body []byte, cacheControl string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		w.Header().Set("Cache-Control", cacheControl)
+		w.Write(body)
 	}
 }
