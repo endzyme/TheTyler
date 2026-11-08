@@ -58,6 +58,13 @@ That's it — the tag push is the entire trigger.
   (`actions/setup-go` reads it and pins `GOTOOLCHAIN=local`). Bump it by hand
   when a Go patch release ships — Dependabot updates `go.mod` requirements but
   not the `toolchain` line.
+- GitHub Actions are pinned to full commit SHAs with a `# vX.Y.Z` comment, and
+  runners to `ubuntu-24.04`. Dependabot bumps the SHA and the comment together;
+  don't replace a pin with a tag like `@v7`.
+- The GoReleaser binary is pinned by the `version:` input in
+  `.github/workflows/release.yml`. Dependabot does not update it: bump it by
+  hand, after running `goreleaser check` and
+  `goreleaser release --snapshot --clean` with the new version locally.
 - Dependabot opens weekly PRs for Go modules and GitHub Actions; the
   **Vulncheck** workflow runs govulncheck on every PR and weekly on `main`.
   A red scheduled Vulncheck run means a new advisory affects the code or the

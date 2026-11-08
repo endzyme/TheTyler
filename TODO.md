@@ -63,6 +63,6 @@ Dependency/toolchain CVEs were cleared separately. These are code and config cha
 
 1. **Spoofable client IP** — with `TRUST_PROXY=true`, `extractIP` (`web-app/internal/handler/submit.go`) trusts the *leftmost* `X-Forwarded-For` entry. Safe behind stock Caddy (it overwrites XFF from untrusted clients), but proxies that append (nginx `$proxy_add_x_forwarded_for`, Railway, Render, Fly) let a client choose that value: an authorized user can allowlist an arbitrary IP and evade the per-IP submit rate limit. Use the rightmost entry or a configurable trusted-hop count.
 2. **Bind address** — HTTP `:8080` and plaintext gRPC `:9090` listen on all interfaces; only the host firewall keeps them private. Add bind-address config (default loopback when behind a proxy).
-3. **Release workflow** — `goreleaser/goreleaser-action@v6` runs with `contents: write` referenced by tag; pin third-party actions to commit SHAs.
+3. ~~**Release workflow** — `goreleaser/goreleaser-action@v6` runs with `contents: write` referenced by tag; pin third-party actions to commit SHAs.~~ Done: all actions are SHA-pinned, the GoReleaser binary is pinned, and `contents: write` is scoped to the release job.
 4. **CSP** — `script-src` allows `https://unpkg.com` and `'unsafe-inline'`. Self-host htmx and move the inline admin script to a file so both can be dropped.
 5. **README** — "Application-Layer Rate Limiting" says the submit endpoint is not rate limited; `handler/ratelimit.go` limits it to 5 per 5 minutes per IP. Correct the docs.
