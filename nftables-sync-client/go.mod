@@ -6,7 +6,7 @@ require (
 	github.com/endzyme/the-tyler/proto/gen v0.0.0
 	github.com/google/nftables v0.3.0
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba
-	golang.org/x/sys v0.49.0
+	golang.org/x/sys v0.50.0
 	google.golang.org/grpc v1.85.0
 )
 
